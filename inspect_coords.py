@@ -90,7 +90,6 @@ def redraw_canvas():
                 cv2.rectangle(current_frame, (hx - 4, hy - 4), (hx + 4, hy + 4), (255, 255, 255), -1)
                 cv2.rectangle(current_frame, (hx - 4, hy - 4), (hx + 4, hy + 4), (0, 0, 0), 1)
 
-    # PERSISTENT BUG FIX: Keep the new box drawn on screen while awaiting name entry
     if awaiting_input and box_to_save:
         bx, by, bw, bh = box_to_save["x"], box_to_save["y"], box_to_save["w"], box_to_save["h"]
         p_color = (255, 0, 255) if box_to_save.get("requires_hover") else (0, 255, 0)
@@ -107,14 +106,21 @@ def redraw_canvas():
         )
 
 
-def process_and_ocr_crop(crop):
+def process_and_ocr_crop(crop, w, h):
+    """Dynamic PSM selection based on box proportions for the inspector tool."""
     if crop is None or crop.size == 0:
         return None, ""
+    
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     scaled = cv2.resize(gray, (0, 0), fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
     _, thresh = cv2.threshold(scaled, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Determine optimal PSM based on dimensions
+    aspect_ratio = w / float(h) if h > 0 else 7
+    psm = 7 if aspect_ratio > 3.0 else 6
+
     try:
-        text = pytesseract.image_to_string(thresh, config="--psm 7").strip()
+        text = pytesseract.image_to_string(thresh, config=f"--psm {psm}").strip()
     except Exception:
         text = "[OCR Error]"
     return thresh, text
@@ -124,16 +130,17 @@ def show_ocr_preview(x1, y1, w, h):
     """Triggers the OCR preview window for a given crop region."""
     global original_frame
     crop = original_frame[y1 : y1 + h, x1 : x1 + w]
-    preview_img, detected_text = process_and_ocr_crop(crop)
+    preview_img, detected_text = process_and_ocr_crop(crop, w, h)
 
     if preview_img is not None:
         preview_bgr = cv2.cvtColor(preview_img, cv2.COLOR_GRAY2BGR)
         ph, pw, _ = preview_bgr.shape
-        combined_canvas = np.zeros((ph + 50, max(pw, 250), 3), dtype=np.uint8)
+        combined_canvas = np.zeros((ph + 100, max(pw, 400), 3), dtype=np.uint8)
         combined_canvas[:ph, :pw] = preview_bgr
         cv2.rectangle(combined_canvas, (0, ph), (combined_canvas.shape[1], ph + 50), (30, 30, 30), -1)
         cv2.putText(combined_canvas, f"OCR: '{detected_text}'", (10, ph + 32), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2, cv2.LINE_AA)
         cv2.imshow("Neow's Eye - OCR Result Preview", combined_canvas)
+        print(f"OCR: '{detected_text}'")
 
 
 def mouse_callback(event, x, y, flags, param):
@@ -248,21 +255,17 @@ def mouse_callback(event, x, y, flags, param):
                 "w": w,
                 "h": h,
                 "requires_hover": requires_hover_flag,
-                "psm": 7,
             }
             awaiting_input = True
             input_text = ""
             
-            # Trigger preview and redraw with box persistently displayed
             show_ocr_preview(x1, y1, w, h)
             redraw_canvas()
 
         elif interaction_mode in ["repositioning"] or interaction_mode.startswith("resizing_"):
-            current_mode = interaction_mode
             interaction_mode = "none"
             save_to_disk()
             
-            # FEATURE: Show OCR preview again after resize or reposition is complete
             if selected_box_name and selected_box_name in layouts:
                 b = layouts[selected_box_name]
                 show_ocr_preview(b["x"], b["y"], b["w"], b["h"])
@@ -312,12 +315,6 @@ def main():
         cv2.setMouseCallback(window_name, mouse_callback)
 
         print("[Neow's Eye] Layout Editor Active.")
-        print(" -> Click any box to select it (shows handles).")
-        print(" -> Drag any of the 8 white handles to resize.")
-        print(" -> Click and drag inside the box body to reposition.")
-        print(" -> Drag empty space to create a new box.")
-        print(" -> Press BACKSPACE or DELETE to delete selected box.")
-
         while True:
             display_frame = draw_ui_overlay(current_frame.copy())
             cv2.imshow(window_name, display_frame)
