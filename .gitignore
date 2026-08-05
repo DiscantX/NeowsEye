@@ -6,3 +6,4 @@ env/
 
 *.pyc
 settings.json
+layout.json
