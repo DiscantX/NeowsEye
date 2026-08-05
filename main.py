@@ -1,60 +1,58 @@
 """
 main.py
 
-Listens continuously to CommunicationMod's unprompted state pushes (sent
-after every in-game action), relayed through stream_adapter.py. Parses
-combat pile data (hand, draw, discard, exhaust) into Card objects via
-state.py. Sends 'state' only to request a snapshot without taking an action.
+CAPTURE MODE (temporary): listens to CommunicationMod's state pushes,
+relayed through stream_adapter.py, until a combat_state shows up --
+then saves that ENTIRE raw message to disk as a single fixed reference
+state and exits. This gives us something stable to itemize offline and
+decide what's worth sending to Gemini, instead of a moving target.
+
+The decision-engine wiring (DecisionTrigger / GeminiClient / state.py's
+snapshot builders) will come back in a later pass once we know what
+CommunicationMod actually sends.
+
+To use: start a fight in-game while this is running. It captures the
+first combat_state it sees and exits on its own.
 """
 
+import json
+
 from stream_client import StreamClient
-from state import Card
+
+OUTPUT_PATH = "sample_combat_state.json"
 
 print("Main process started. Connecting to stream_adapter.py...")
 
 client = StreamClient()
 client.start()
 
-print("Connected successfully! Listening for state updates...\n")
+print("Connected! Waiting for a combat state to capture...\n")
 
-PILE_KEYS = ("hand", "draw_pile", "discard_pile", "exhaust_pile")
-
-while True:
+captured = False
+while not captured:
     message = client.get_message()
     if message is None:
-        print("Adapter disconnected.")
+        print("Adapter disconnected before a combat state arrived.")
         break
 
     if not message.get("in_game"):
-        print(f"in_game=False available_commands={message.get('available_commands')}")
+        print("in_game=False -- waiting for a run to start...")
         continue
 
     game_state = message.get("game_state", {})
-    screen_type = game_state.get("screen_type")
-    combat_state = game_state.get("combat_state")
-
-    if combat_state is None:
-        # Not in combat right now (e.g. on the map, in a shop, at a reward screen).
-        print(f"screen_type={screen_type} room_type={game_state.get('room_type')}")
+    if game_state.get("combat_state") is None:
+        print(
+            f"screen_type={game_state.get('screen_type')} "
+            f"room_type={game_state.get('room_type')} (waiting for combat)"
+        )
         continue
 
-    piles = {
-        key: [Card.from_dict(c) for c in combat_state.get(key, [])]
-        for key in PILE_KEYS
-    }
+    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
+        json.dump(message, f, indent=2, sort_keys=True)
 
-    print(f"screen_type={screen_type} turn={combat_state.get('turn')}")
-    print(
-        f"  hand={len(piles['hand'])} "
-        f"draw_pile={len(piles['draw_pile'])} "
-        f"discard_pile={len(piles['discard_pile'])} "
-        f"exhaust_pile={len(piles['exhaust_pile'])}"
-    )
-
-    print("Hand:")
-    for card in piles["hand"]:
-        tag = " [UPGRADED]" if card.upgrades else ""
-        playable = "" if card.is_playable else " (not playable)"
-        print(f"  - {card.name}{tag} cost={card.cost}{playable}")
+    combat_state = game_state["combat_state"]
+    print(f"\nCaptured combat state -> {OUTPUT_PATH}")
+    print(f"  turn={combat_state.get('turn')} room_type={game_state.get('room_type')}")
+    captured = True
 
 client.close()
