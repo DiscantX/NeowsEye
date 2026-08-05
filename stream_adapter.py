@@ -1,15 +1,20 @@
 """
-Stream Adapter 
+Stream Adapter
 
 Bridges communication between CommunicationMod's stdin/stdout protocol
-and the main program by routing messages through network sockets.
+and the main program by routing messages through a TCP socket.
 
 Note that this script should be run as a subprocess of CommunicationMod.
 It is not run at all by the main program. The only interaction it has with
-main is through web sockets.
+main is through the socket, via stream_client.py.
 
-To run this as a subprocess of CommuncationMod, you must point the mod's
-`config.properties file to this file.
+Survives main.py restarting: the adapter keeps accepting new connections
+for its whole lifetime, so you can stop/restart main.py without restarting
+the game or CommunicationMod. Only one client is served at a time; a new
+connection replaces the previous one.
+
+To run this as a subprocess of CommunicationMod, you must point the mod's
+`config.properties` file to this file.
 
 Instructions can be found at: https://github.com/ForgottenArbiter/CommunicationMod
 
@@ -22,67 +27,94 @@ import socket
 import sys
 import threading
 
-class Adapter:
-    def __init__(self, host='127.0.0.1', port=12345):
-        self.host = host
-        self.port = port
-        self.connection = None
-        self.address = None
-        self.send_ready_signal()
-        self.create_server()        # Warning: blocks until main.py connects
-        
-    def create_server(self):
+from stream_peer import StreamPeer, HOST, PORT
+
+
+class StreamAdapter(StreamPeer):
+    def __init__(self, host=HOST, port=PORT):
+        super().__init__(host, port)
+        self.server = None
+        self.connection_address = None
+        self._socket_lock = threading.Lock()
+
+    def start(self):
+        """Announces readiness to CommunicationMod and opens the listening socket."""
+        self._send_ready_signal()
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server.bind((self.host, self.port))
         self.server.listen(1)
-        # Sits here until you open your terminal and run main.py
-        self.connection, self.address = self.server.accept()
-        
-    def send_ready_signal(self):
-        print("ready", flush=True)    
-        
-    def relay_from_main_to_java(self):
-        """THREAD 1: Continually reads from main.py socket and prints to Java"""
+
+    def _send_ready_signal(self):
+        print("ready", flush=True)
+
+    def _accept_loop(self):
+        """THREAD: repeatedly accepts new client connections for the life of the
+        process, so main.py can be stopped and restarted without restarting
+        this adapter or the game. Each accepted connection gets its own
+        incoming-relay thread; a new connection replaces the previous one."""
         while True:
-            try:
-                data = self.connection.recv(1024)
-                if not data:
-                    break
-                message = data.decode('utf-8')
-                print(f"FROM_MAIN: {message}", flush=True)   
-            except ConnectionResetError:
-                break
-                
-    def relay_from_java_to_main(self):
-        """THREAD 2: Continually reads from Java stdin and sends to main.py socket"""
-        # This acts as your loop over _read_stdin
+            connection, address = self.server.accept()
+            print(f"Client connected: {address}", file=sys.stderr, flush=True)
+
+            with self._socket_lock:
+                self.socket = connection
+                self.connection_address = address
+                self._buffer = ""  # discard any partial line from a prior connection
+
+            relay_thread = threading.Thread(
+                target=self._relay_incoming, args=(connection,), daemon=True
+            )
+            relay_thread.start()
+
+    def _relay_incoming(self, connection):
+        """THREAD: reads lines from one client connection (via the socket) and
+        prints them to Java. Exits when that connection closes."""
+        for line in self._read_lines(connection):
+            print(line, flush=True)
+
+        with self._socket_lock:
+            if self.socket is connection:
+                print("Client disconnected.", file=sys.stderr, flush=True)
+                self.socket = None
+
+    def _relay_outgoing(self):
+        """MAIN THREAD: reads lines from Java's stdout (piped to our stdin) and
+        sends them to whichever client is currently connected, if any."""
         for line in sys.stdin:
             message = line.strip()
-            
-            # Complete logic: encode string to bytes and send over socket
+            if not message:
+                continue
+            with self._socket_lock:
+                current_socket = self.socket
+            if current_socket is None:
+                # No client connected right now; nothing to send to. The
+                # client will get a fresh snapshot via 'state' once it
+                # reconnects, so dropping this is safe rather than blocking.
+                continue
             try:
-                payload = f"{message}\n".encode('utf-8')
-                self.connection.sendall(payload)
-            except Exception as e:
+                current_socket.sendall(f"{message}\n".encode('utf-8'))
+            except OSError as e:
                 print(f"Socket send failed: {e}", file=sys.stderr)
 
     def communicate(self):
-        # Spin up Thread 1 to handle main.py -> Java
-        main_to_java_thread = threading.Thread(target=self.relay_from_main_to_java, daemon=True)
-        main_to_java_thread.start()
-        
-        # Run Thread 2 on the MAIN thread to handle Java -> main.py
-        # This keeps the script alive and prevents it from exiting immediately
-        self.relay_from_java_to_main()
-        
-        # Clean up if the stdin loop ever finishes
-        self.connection.close()
+        """Starts the accept loop, then runs the outgoing relay on the main
+        thread. This keeps the process alive for as long as Java's stdout
+        stays open, across any number of client connect/disconnect cycles."""
+        accept_thread = threading.Thread(target=self._accept_loop, daemon=True)
+        accept_thread.start()
+
+        self._relay_outgoing()
+
+        self.close()
         self.server.close()
 
+
 def main():
-    adapter = Adapter()
+    adapter = StreamAdapter()
+    adapter.start()
     adapter.communicate()
+
 
 if __name__ == "__main__":
     main()
