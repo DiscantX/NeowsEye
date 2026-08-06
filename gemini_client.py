@@ -23,6 +23,13 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from dataclasses import dataclass
+
+@dataclass
+class GeminiReply:
+    text: str
+    usage_metadata: object  # raw google.genai usage_metadata, or None
+
 load_dotenv()
 
 # Check https://ai.google.dev/gemini-api/docs/models for the current
@@ -96,6 +103,9 @@ class GeminiClient:
         return self._ask(context, chat)
 
     @staticmethod
-    def _ask(payload: dict, chat) -> str:
+    def _ask(payload: dict, chat) -> "GeminiReply":
         response = chat.send_message(json.dumps(payload))
-        return response.text.strip()
+        return GeminiReply(
+            text=response.text.strip(),
+            usage_metadata=getattr(response, "usage_metadata", None),
+        )
