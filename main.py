@@ -28,7 +28,7 @@ from gemini_worker import GeminiWorker
 from run_state import RunState
 from stream_client import StreamClient
 from terminal_observer import TerminalObserver
-
+from tkinter_app import CoachOverlay
 
 def build_default_observer() -> ObserverBroadcaster:
     """The terminal path. A future UI entry point adds a UI observer
@@ -69,6 +69,8 @@ def main(observer: ObserverBroadcaster = None):
     in_combat = False
     polls_seen = 0
     prompts_fired = 0
+
+    overlay = CoachOverlay
 
     try:
         while True:
