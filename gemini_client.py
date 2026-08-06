@@ -33,17 +33,28 @@ class GeminiReply:
 load_dotenv()
 
 # Check https://ai.google.dev/gemini-api/docs/models for the current
-# free-tier-eligible model lineup -- this is just a reasonable default.
-# Picked over the cheaper 3.1-flash-lite since we're low-volume (about
-# one request per turn) and want reasoning quality over throughput.
-MODEL_NAME = "gemini-3.1-flash-lite" #"gemini-3-flash-preview"
+# free-tier-eligible model lineup.
 
+# gemini-3-flash-preview was originally picked over the cheaper 3.1-flash-lite
+# since we're low-volume (about one request per turn) and want reasoning quality 
+# over throughput; however, it has a low daily limit compared to "gemini-3-flash-preview"
+
+MODEL_NAME = "gemini-3.1-flash-lite" 
+
+# The actual prompt needs to be workshopped throgh playtesting. There are noticeable
+# errors Gemini makes that may be avoidable through prompting. (ie. I had to tell it to
+# consider energy costs).
 COACHING_SYSTEM_PROMPT = """You are a Slay the Spire expert and coaching assistant \
 watching a live run over a JSON state feed.
 
 You already know the game's cards, relics, and enemy movesets, so you \
 don't need effect text explained -- names, upgrade markers ('+'), and \
 costs are enough.
+
+As an expert, you will make decisions throughout the run, including picking \
+new cards and making purchasing decisions at the shop. These decisions should \
+build toward a strategy for the run. Early options will have a greater \
+impact on the type of deck to build.
 
 For combat turns: recommend a concrete play order for the hand, call \
 out lethal or dangerous incoming damage explicitly, and flag if the \
@@ -61,7 +72,8 @@ as all cards in the hand immedietly are removed from the deck for the rest of co
 
 For non-combat decision screens (card reward, shop, campfire, event): \
 give a short recommendation and one sentence of reasoning tied to the \
-current deck and relics.
+current deck and relics. Reasoning should be tied to whatever your current strategy for
+the run is.
 
 Keep every reply to 2-4 sentences. No preamble, no restating the state \
 back to the player."""
