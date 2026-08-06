@@ -70,34 +70,25 @@ class Card:
             self.ethereal,
         )
 
-    def to_prompt_dict(self, quantity: int = 1) -> dict:
-        """Compact form for a HAND card mid-combat: name (with '+' if
-        upgraded), cost, this-turn playability, and quantity if this
-        entry represents more than one identical copy. Deliberately no
-        effect-text field -- we lean on Gemini already knowing Slay the
-        Spire's cards rather than shipping/maintaining a card-effect
-        database ourselves."""
+def to_prompt_dict(self, quantity: int = 1) -> dict:
         d = {
-            "name": self.name + ("+" if self.upgrades else ""),
+            "name": self.name,
             "cost": self.cost,
             "playable": self.is_playable,
+            "quantity": quantity,
         }
         if self.exhausts:
             d["exhausts"] = True
         if self.ethereal:
             d["ethereal"] = True
-        if quantity > 1:
-            d["quantity"] = quantity
         return d
 
-    def to_deck_entry(self, quantity: int = 1) -> dict:
-        """Compact form for a DECK listing (outside the context of a
-        hand/turn) -- playable/exhausts/ethereal aren't meaningful here
-        since they depend on combat state this card isn't currently in."""
-        d = {"name": self.name + ("+" if self.upgrades else ""), "cost": self.cost}
-        if quantity > 1:
-            d["quantity"] = quantity
-        return d
+def to_deck_entry(self, quantity: int = 1) -> dict:
+    return {
+        "name": self.name,
+        "cost": self.cost,
+        "quantity": quantity,
+    }
 
 
 def dedupe_cards(cards: list) -> list:

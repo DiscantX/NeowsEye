@@ -15,13 +15,33 @@ NON_COMBAT_DECISION_SCREENS = {
     "CARD_REWARD",
     "COMBAT_REWARD",
     "SHOP_SCREEN",
-    "SHOP_ROOM",
     "REST",
     "EVENT",
     "BOSS_REWARD",
-    "GRID",  # e.g. discard/select-card screens
+    "GRID",
     "HAND_SELECT",
 }
+# SHOP_ROOM removed -- first-enter payload is always screen_state: {},
+# no stock loaded yet. SHOP_SCREEN is the one that carries real inventory.
+
+
+def _count_enabled_options(screen_state: dict) -> int:
+    options = screen_state.get("options") or []
+    return sum(1 for o in options if not o.get("disabled"))
+
+
+def _grid_flavor(screen_state: dict) -> str:
+    """Distinguishes the different GRID sub-screens (purge/upgrade/
+    transform) so a genuine flavor change within GRID is still treated
+    as a new decision, even though we otherwise dedupe GRID per-visit
+    rather than per-screen_state (see should_prompt)."""
+    if screen_state.get("for_purge"):
+        return "purge"
+    if screen_state.get("for_upgrade"):
+        return "upgrade"
+    if screen_state.get("for_transform"):
+        return "transform"
+    return "other"
 
 
 class DecisionTrigger:
@@ -33,14 +53,12 @@ class DecisionTrigger:
         combat_state = game_state.get("combat_state")
 
         if combat_state is not None:
-            self._last_screen_key = None  # left any non-combat screen
+            self._last_screen_key = None
             turn = combat_state.get("turn")
             is_new_turn = turn != self._last_combat_turn
             self._last_combat_turn = turn
             return is_new_turn
 
-        # Not in combat right now -- reset so the next fight's turn 1
-        # always registers as new.
         self._last_combat_turn = None
 
         screen_type = game_state.get("screen_type")
@@ -48,16 +66,71 @@ class DecisionTrigger:
             self._last_screen_key = None
             return False
 
-        # Fingerprint screen_type + screen_state so repeated unprompted
-        # pushes for the *same* reward/shop/event screen don't re-fire.
-        screen_key = (screen_type, _fingerprint(game_state.get("screen_state")))
+        screen_state = game_state.get("screen_state") or {}
+
+        # EVENT screens with <=1 enabled option are narrative pass-throughs
+        # ("[Continue]", "[Leave]", "[Talk]") -- nothing to weigh in on.
+        if screen_type == "EVENT" and _count_enabled_options(screen_state) <= 1:
+            self._last_screen_key = None
+            return False
+
+        # REST fires again after the player has already rested/smithed --
+        # has_rested=True means the decision is already made.
+        if screen_type == "REST" and screen_state.get("has_rested"):
+            self._last_screen_key = None
+            return False
+
+        if screen_type == "COMBAT_REWARD":
+            return self._should_prompt_combat_reward(screen_state, game_state)
+
+        if screen_type == "GRID":
+            return self._should_prompt_grid(screen_state)
+
+        # Default: fingerprint-based dedupe (CARD_REWARD, SHOP_SCREEN,
+        # BOSS_REWARD, HAND_SELECT, and multi-option EVENT).
+        screen_key = (screen_type, _fingerprint(screen_state))
         is_new = screen_key != self._last_screen_key
         self._last_screen_key = screen_key
         return is_new
 
+    def _should_prompt_combat_reward(self, screen_state: dict, game_state: dict) -> bool:
+        """Fires at most once per reward screen visit (not once per pick --
+        the screen_state shrinks as gold/relic/potion/card get taken, which
+        used to look like 3-4 'new' screens). Gold is auto-take and the
+        card slot here is just a placeholder (the real card choice is the
+        separate CARD_REWARD screen, tracked on its own), so the only
+        genuine decision left is a potion pickup when slots are already
+        full.
 
-def _fingerprint(screen_state):
-    try:
-        return json.dumps(screen_state, sort_keys=True)
-    except TypeError:
-        return str(screen_state)
+        TODO: revisit the relic side of this if playtesting turns up
+        relics worth skipping (e.g. situational downsides) -- right now
+        relics are assumed always-worth-taking and never gate a prompt.
+        """
+        screen_key = ("COMBAT_REWARD",)
+        is_new_visit = screen_key != self._last_screen_key
+        self._last_screen_key = screen_key
+        if not is_new_visit:
+            return False
+
+        rewards = screen_state.get("rewards", [])
+        has_potion_reward = any(r.get("reward_type") == "POTION" for r in rewards)
+        if not has_potion_reward:
+            return False
+
+        current_potions = game_state.get("potions", [])
+        real_potion_count = sum(
+            1 for p in current_potions
+            if p.get("name") and p.get("name") != "Potion Slot"
+        )
+        return real_potion_count >= 3
+
+    def _should_prompt_grid(self, screen_state: dict) -> bool:
+        """Fires once per visit to a GRID screen (keyed by type + flavor:
+        purge/upgrade/transform), ignoring internal screen_state churn --
+        e.g. a shop purchase elsewhere changing the fingerprint used to
+        re-trigger this on every poll while the player was still looking
+        at the same purge/upgrade choice."""
+        screen_key = ("GRID", _grid_flavor(screen_state))
+        is_new = screen_key != self._last_screen_key
+        self._last_screen_key = screen_key
+        return is_new
