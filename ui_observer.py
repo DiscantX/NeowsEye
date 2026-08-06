@@ -37,6 +37,12 @@ class UIObserver(CoachingObserver):
 
     All UI updates happen in the GeminiWorker thread (background thread) so
     main.py's event loop never blocks on network latency or UI painting.
+    Every CoachOverlay method this class calls (update_feedback,
+    update_prompt, update_tokens, start_eta_countdown, set_eta_ready,
+    set_eta_error) is itself safe to call from a non-main thread --
+    each hands off to Tkinter's main thread internally via .after(0, ...).
+    This class must never touch overlay widgets (e.g. eta_label,
+    eta_bar) directly, since those aren't thread-safe on their own.
     """
 
     def __init__(self, overlay: CoachOverlay):
@@ -47,6 +53,7 @@ class UIObserver(CoachingObserver):
     def on_connection_status(self, event: ConnectionEvent) -> None:
         """Update overlay status when ConnectionMod connects/disconnects."""
         with self._lock:
+            self._overlay.set_connection_status(event.connected)
             if event.connected:
                 self._overlay.feedback_status("Connected to Neow's Eye")
             else:
@@ -99,9 +106,10 @@ class UIObserver(CoachingObserver):
             limit = 200000  # Configurable from .env or settings
             self._overlay.update_tokens(tokens_used, limit)
 
-            # Clear ETA after response arrives
-            self._overlay.eta_label.config(text="Ready!")
-            self._overlay.eta_bar.coords(self._overlay.eta_bar_progress, 0, 0, 140, 10)
+            # Clear ETA after response arrives -- routed through the
+            # thread-safe helper rather than touching eta_label/eta_bar
+            # directly, since this method runs on GeminiWorker's thread.
+            self._overlay.set_eta_ready()
             self._overlay.feedback_status(f"Response received (lat {event.latency_s:.1f}s)")
 
     def on_error(self, event: ErrorEvent) -> None:
@@ -112,7 +120,7 @@ class UIObserver(CoachingObserver):
                 error_msg += f" (Prompt #{event.prompt_seq})"
 
             self._overlay.update_feedback(f"⚠️ Error: {error_msg}")
-            self._overlay.eta_label.config(text="Error!")
+            self._overlay.set_eta_error()
             self._overlay.feedback_status(f"Error: {event.message}")
 
     def on_state_snapshot(self, event) -> None:
