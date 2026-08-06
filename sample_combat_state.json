@@ -15,7 +15,34 @@
     "class": "IRONCLAD",
     "combat_state": {
       "cards_discarded_this_turn": 0,
-      "discard_pile": [],
+      "discard_pile": [
+        {
+          "cost": 1,
+          "ethereal": false,
+          "exhausts": false,
+          "has_target": false,
+          "id": "Defend_R",
+          "is_playable": true,
+          "name": "Defend",
+          "rarity": "BASIC",
+          "type": "SKILL",
+          "upgrades": 0,
+          "uuid": "5c946312-929d-4a68-a285-ab20cb2c01e8"
+        },
+        {
+          "cost": 1,
+          "ethereal": false,
+          "exhausts": false,
+          "has_target": false,
+          "id": "Defend_R",
+          "is_playable": true,
+          "name": "Defend",
+          "rarity": "BASIC",
+          "type": "SKILL",
+          "upgrades": 0,
+          "uuid": "c2deb984-9982-4f7a-9a60-052b49b1d231"
+        }
+      ],
       "draw_pile": [
         {
           "cost": 1,
@@ -91,25 +118,12 @@
           "exhausts": false,
           "has_target": true,
           "id": "Bash",
-          "is_playable": true,
+          "is_playable": false,
           "name": "Bash",
           "rarity": "BASIC",
           "type": "ATTACK",
           "upgrades": 0,
           "uuid": "f249ea0d-d865-43bf-b3fb-240fd41db6f1"
-        },
-        {
-          "cost": 1,
-          "ethereal": false,
-          "exhausts": false,
-          "has_target": false,
-          "id": "Defend_R",
-          "is_playable": true,
-          "name": "Defend",
-          "rarity": "BASIC",
-          "type": "SKILL",
-          "upgrades": 0,
-          "uuid": "5c946312-929d-4a68-a285-ab20cb2c01e8"
         },
         {
           "cost": 1,
@@ -123,19 +137,6 @@
           "type": "ATTACK",
           "upgrades": 0,
           "uuid": "7a0a3f7b-d3ef-46cb-9f25-0ab29d87e514"
-        },
-        {
-          "cost": 1,
-          "ethereal": false,
-          "exhausts": false,
-          "has_target": false,
-          "id": "Defend_R",
-          "is_playable": true,
-          "name": "Defend",
-          "rarity": "BASIC",
-          "type": "SKILL",
-          "upgrades": 0,
-          "uuid": "c2deb984-9982-4f7a-9a60-052b49b1d231"
         },
         {
           "cost": 1,
@@ -158,10 +159,10 @@
           "current_hp": 1,
           "half_dead": false,
           "id": "SpikeSlime_S",
-          "intent": "DEBUG",
+          "intent": "ATTACK",
           "is_gone": false,
           "max_hp": 13,
-          "move_adjusted_damage": -1,
+          "move_adjusted_damage": 5,
           "move_base_damage": 5,
           "move_hits": 1,
           "move_id": 1,
@@ -173,7 +174,7 @@
           "current_hp": 1,
           "half_dead": false,
           "id": "AcidSlime_M",
-          "intent": "DEBUG",
+          "intent": "DEBUFF",
           "is_gone": false,
           "max_hp": 29,
           "move_adjusted_damage": -1,
@@ -185,9 +186,9 @@
         }
       ],
       "player": {
-        "block": 0,
+        "block": 10,
         "current_hp": 80,
-        "energy": 3,
+        "energy": 1,
         "max_hp": 80,
         "orbs": [],
         "powers": []
@@ -320,7 +321,7 @@
         "exhausts": false,
         "has_target": true,
         "id": "Bash",
-        "is_playable": true,
+        "is_playable": false,
         "name": "Bash",
         "rarity": "BASIC",
         "type": "ATTACK",

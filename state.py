@@ -1,3 +1,18 @@
+"""
+state.py
+
+Pure dict-transform layer. Every class here does ONE job: turn a raw
+CommunicationMod JSON fragment into a typed object, and (optionally) back
+into a compact dict for a Gemini payload. Nothing in this file persists
+across polls -- that's run_state.py's job (RunState / CombatState own the
+objects built here and decide what's changed since we last spoke to
+Gemini).
+
+Keep it that way: if you find yourself wanting one of these objects to
+remember something between calls, that need belongs in run_state.py, not
+here.
+"""
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -37,25 +52,69 @@ class Card:
             ethereal=data.get("ethereal", False),
         )
 
-    def to_prompt_dict(self) -> dict:
+    def dedupe_key(self) -> tuple:
+        """Two cards are 'the same card' for listing purposes iff every
+        one of these matches. NOTE: cost is deliberately included --
+        this is what makes Snecko Eye's randomized-cost copies of a card
+        correctly show up as separate entries instead of being
+        (wrongly) collapsed together."""
+        return (
+            self.name,
+            self.upgrades,
+            self.cost,
+            self.type,
+            self.rarity,
+            self.is_playable,
+            self.has_target,
+            self.exhausts,
+            self.ethereal,
+        )
+
+    def to_prompt_dict(self, quantity: int = 1) -> dict:
         """Compact form for a HAND card mid-combat: name (with '+' if
-        upgraded), cost, and this-turn playability. Deliberately no
+        upgraded), cost, this-turn playability, and quantity if this
+        entry represents more than one identical copy. Deliberately no
         effect-text field -- we lean on Gemini already knowing Slay the
         Spire's cards rather than shipping/maintaining a card-effect
         database ourselves."""
-        return {
+        d = {
             "name": self.name + ("+" if self.upgrades else ""),
             "cost": self.cost,
             "playable": self.is_playable,
-            "exhausts": self.exhausts,
-            "ethereal": self.ethereal,
         }
+        if self.exhausts:
+            d["exhausts"] = True
+        if self.ethereal:
+            d["ethereal"] = True
+        if quantity > 1:
+            d["quantity"] = quantity
+        return d
 
-    def to_deck_entry(self) -> dict:
+    def to_deck_entry(self, quantity: int = 1) -> dict:
         """Compact form for a DECK listing (outside the context of a
         hand/turn) -- playable/exhausts/ethereal aren't meaningful here
         since they depend on combat state this card isn't currently in."""
-        return {"name": self.name + ("+" if self.upgrades else ""), "cost": self.cost}
+        d = {"name": self.name + ("+" if self.upgrades else ""), "cost": self.cost}
+        if quantity > 1:
+            d["quantity"] = quantity
+        return d
+
+
+def dedupe_cards(cards: list) -> list:
+    """Collapse a list of Card objects into (card, quantity) pairs,
+    grouping by Card.dedupe_key(). Order of first appearance is
+    preserved. Used for both deck listings and hand listings -- same
+    rule either way: identical on every tracked field means functionally
+    the same card, so collapse to a quantity instead of repeating it."""
+    groups = {}
+    order = []
+    for card in cards:
+        key = card.dedupe_key()
+        if key not in groups:
+            groups[key] = [card, 0]
+            order.append(key)
+        groups[key][1] += 1
+    return [tuple(groups[key]) for key in order]
 
 
 @dataclass
@@ -72,6 +131,36 @@ class Power:
 
 
 @dataclass
+class Orb:
+    """Defect's orb slots (Frost/Lightning/Dark/Plasma).
+
+    FLAGGED UNCERTAIN: built from the documented CommunicationMod field
+    names, but we haven't captured a real Defect combat_state yet to
+    confirm them. 'evoke_amount' is a guess for Dark/Frost orb values
+    based on the mod's general naming pattern (mirrors move_adjusted_damage
+    style keys) -- verify against a real capture before trusting this,
+    and adjust from_dict() rather than downstream code if the field name
+    is wrong.
+    """
+
+    id: str  # e.g. "Frost", "Lightning", "Dark", "Plasma", "Empty"
+    evoke_amount: Optional[int]  # meaningful for Dark (stored dmg) / Frost (stored block)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Orb":
+        return cls(
+            id=data.get("id", data.get("name", "?")),
+            evoke_amount=data.get("evoke_amount"),
+        )
+
+    def to_prompt_dict(self) -> dict:
+        d = {"type": self.id}
+        if self.evoke_amount is not None:
+            d["value"] = self.evoke_amount
+        return d
+
+
+@dataclass
 class Monster:
     name: str
     current_hp: int
@@ -80,6 +169,7 @@ class Monster:
     intent: str
     move_damage: Optional[int]
     move_hits: Optional[int]
+    half_dead: bool
     powers: list
 
     @classmethod
@@ -92,6 +182,7 @@ class Monster:
             intent=data.get("intent", "NONE"),
             move_damage=data.get("move_adjusted_damage"),
             move_hits=data.get("move_hits"),
+            half_dead=data.get("half_dead", False),
             powers=[Power.from_dict(p) for p in data.get("powers", [])],
         )
 
@@ -103,90 +194,58 @@ class Monster:
             "block": self.block,
             "intent": self.intent,
         }
-        if self.move_damage is not None:
+        if self.move_damage is not None and self.move_damage >= 0:
             d["incoming_damage"] = self.move_damage
             d["hits"] = self.move_hits
+        if self.half_dead:
+            # Slime-split warning -- only worth the tokens when true.
+            d["half_dead"] = True
         if self.powers:
             d["powers"] = [p.to_prompt_dict() for p in self.powers]
         return d
 
 
-PILE_KEYS = ("hand", "draw_pile", "discard_pile", "exhaust_pile")
+@dataclass
+class Relic:
+    id: str
+    name: str
+    counter: int
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Relic":
+        return cls(
+            id=data.get("id", ""),
+            name=data.get("name", data.get("id", "?")),
+            counter=data.get("counter", -1),
+        )
+
+    def to_prompt_dict(self) -> dict:
+        d = {"name": self.name}
+        if self.counter != -1:
+            # -1 appears to be CommunicationMod's "not applicable" sentinel
+            # for relics that don't track a counter at all -- confirm
+            # against more captures, but treat it as "omit" for now.
+            d["counter"] = self.counter
+        return d
 
 
-def _relic_names(game_state: dict) -> list:
-    return [r.get("name", r.get("id")) for r in game_state.get("relics", [])]
+@dataclass
+class Potion:
+    id: str
+    name: str
+    can_use: bool
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "Potion":
+        return cls(
+            id=data.get("id", ""),
+            name=data.get("name", "?"),
+            can_use=data.get("can_use", False),
+        )
 
-def _potion_names(game_state: dict) -> list:
-    return [
-        p.get("name")
-        for p in game_state.get("potions", [])
-        if p.get("name") and p.get("name") != "Potion Slot"
-    ]
+    def is_real(self) -> bool:
+        """False for empty 'Potion Slot' placeholder entries."""
+        return bool(self.name) and self.name != "Potion Slot"
 
-
-def _turn_payload(combat_state: dict) -> dict:
-    player = combat_state.get("player", {})
-    return {
-        "turn": combat_state.get("turn"),
-        "player": {
-            "hp": player.get("current_hp"),
-            "max_hp": player.get("max_hp"),
-            "block": player.get("block"),
-            # NOTE: verify against a real CommunicationMod dump -- energy
-            # may live at combat_state level rather than under player.
-            "energy": player.get("energy", combat_state.get("player_energy")),
-            "powers": [Power.from_dict(p).to_prompt_dict() for p in player.get("powers", [])],
-        },
-        "monsters": [
-            Monster.from_dict(m).to_prompt_dict()
-            for m in combat_state.get("monsters", [])
-            if not m.get("is_gone")
-        ],
-        "hand": [Card.from_dict(c).to_prompt_dict() for c in combat_state.get("hand", [])],
-        "draw_pile_count": len(combat_state.get("draw_pile", [])),
-        "discard_pile_count": len(combat_state.get("discard_pile", [])),
-        "exhaust_pile_count": len(combat_state.get("exhaust_pile", [])),
-    }
-
-
-def build_combat_intro(game_state: dict) -> dict:
-    """One-time payload sent when a new combat starts and a fresh Gemini
-    chat session opens: everything that WON'T change turn to turn (deck,
-    relics, potions), plus the turn-1 snapshot. Everything after this is
-    a cheap build_turn_delta() within the same session."""
-    combat_state = game_state["combat_state"]
-    return {
-        "event": "combat_start",
-        "deck": [Card.from_dict(c).to_deck_entry() for c in game_state.get("deck", [])],
-        "relics": _relic_names(game_state),
-        "potions": _potion_names(game_state),
-        **_turn_payload(combat_state),
-    }
-
-
-def build_turn_delta(combat_state: dict) -> dict:
-    """Lightweight per-turn payload sent within an already-open combat
-    chat session: just what changed (hand, energy, hp/block, monster
-    intents). No deck/relics resend needed."""
-    return {"event": "turn_update", **_turn_payload(combat_state)}
-
-
-def build_noncombat_context(game_state: dict) -> dict:
-    """Payload for non-combat decision screens (card reward, shop,
-    campfire, event, etc). Sent as a one-off ask rather than a persistent
-    chat session, since these are spaced far apart in a run."""
-    return {
-        "event": "decision_screen",
-        "screen_type": game_state.get("screen_type"),
-        "screen_state": game_state.get("screen_state"),
-        "hp": game_state.get("current_hp"),
-        "max_hp": game_state.get("max_hp"),
-        "gold": game_state.get("gold"),
-        "act": game_state.get("act"),
-        "floor": game_state.get("floor"),
-        "deck": [Card.from_dict(c).to_deck_entry() for c in game_state.get("deck", [])],
-        "relics": _relic_names(game_state),
-        "potions": _potion_names(game_state),
-    }
+    def to_prompt_dict(self) -> dict:
+        return {"name": self.name, "can_use": self.can_use}

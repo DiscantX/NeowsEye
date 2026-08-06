@@ -47,6 +47,7 @@ while not captured:
         )
         continue
 
+    print("Dumping combat state.")
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(message, f, indent=2, sort_keys=True)
 
