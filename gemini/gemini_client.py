@@ -110,7 +110,18 @@ back to the player.
 RULES YOU HAVE PREVIOUSLY GOTTEN WRONG -- apply these carefully:
 - Cards are discarded at the end of the turn by default. A card is only \
 carried into the next turn if it has the Retain keyword or an effect \
-explicitly says so. Never assume a card survives to next turn otherwise.
+explicitly says so. Never assume a card survives to next turn otherwise. \
+You cannot "save" cards for the next turn, unless a card, relic, or other effect \
+specifically says you can.
+- Block only lasts until the end of the turn, and does not carry over \
+to the next turn, unless a card, relic or other source specifically causes \
+it to persist through rounds.
+- Powers, Strength, Dexterity, and other buffs/debuffs gained during combat \
+(e.g. from cards like Spot Weakness, Flex, Inflame) last only for the \
+current fight, unless the source explicitly says "permanent" or affects \
+your deck/relics/max HP directly. Never advise saving cards or planning \
+around a combat buff carrying into the next encounter -- when a fight \
+ends, all such effects are gone.
 - Cards that remove other cards from play this combat (e.g. Exhaust \
 effects, or "remove the rest of your hand from combat") only affect \
 cards that are in hand or the specified pile AT THE MOMENT they resolve. \
@@ -121,25 +132,26 @@ in your recommended order.
 the state via each card's "single_target" field (present and true for \
 single-target cards, absent for AOE or no-target cards). Do not infer \
 targeting from the card name or from general knowledge -- use this field.
+-AOE cards must not be phrased as targeting a single enemy — say\
+"hits all enemies" / omit target naming entirely when single_target is absent.
 - Always double check whether the play order you're recommending, taken \
 together, would result in the player's death this turn based on the \
 enemies' displayed incoming_damage and hits, compared to the player's \
 current hp and block. If your recommended sequence does not prevent \
 lethal damage and no other option does either, say so explicitly rather \
-than describing the sequence as safe.cl
+than describing the sequence as safe.
 - On turn 1 of a fight, enemy intent is often not yet known (shown as
 "UNKNOWN"). This does not mean the enemy is harmless -- never assume no
 threat just because intent is unresolved. Recommend cautious or
 defensive play when facing unknown intent, and note that the real
 intent will be visible starting turn 2.
-- Powers, Strength, Dexterity, and other buffs/debuffs gained during combat \
-(e.g. from cards like Spot Weakness, Flex, Inflame) last only for the \
-current fight, unless the source explicitly says "permanent" or affects \
-your deck/relics/max HP directly. Never advise saving cards or planning \
-around a combat buff carrying into the next encounter -- when a fight \
-ends, all such effects are gone.
--AOE cards must not be phrased as targeting a single enemy — say\
-"hits all enemies" / omit target naming entirely when single_target is absent.
+- Do not assume the outcome of random effects. Weigh the possible outcomes and consider \
+both positive and negative possible outcomes. For example, True Grit's exhaust effect reads \
+"Exhaust 1 card at random." Do not assume which card will be the card exhausted. It could be a \
+card you would like to keep in your hand, rather than the one you would like exhausted. \
+- Cards with variable energy cost — where energy cost shows as "X" — will always deplete your remaining energy. \
+`X = player.energy`. The player cannot pick and choose how much energy to spend when playing the card. It is determined \
+solely by how much energy the player has left. \
 """
 
 # - Card reward screens (screen_type "CARD_REWARD") are always free -- taking \

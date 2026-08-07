@@ -6,12 +6,26 @@
 
 This is a complicated question. We need to determine when to provide additional information to Gemini, and what information to provide. Some examples of when we might want to provide additional information:
 
+**NOTE** The following three may have been fixed with the recent "push full state in noncombat" commit. Needs verification.
+
 * Provide gold on first prompt given at: Unkown, merchant, rest (and future map decisons)
 * Provide health: Every prompt? It's almost universally required.
 * Provide cards in deck: Every combat start? Every card reward choice/shop? Never, does it track it fine on its own?
+
+#### Mid-turn option change
+
+Priority: **High-priority**
+
 * In combat, we need to reprompt when the situation changes mid-turn, such as drawing more cards.
-* In combat, if we have a card that interacts with the draw or discard pile, do we provide their contents? How do we know which cards do this?
-* **Map screen** -- a more complicated, already deferred feature. When at a crossroads, provide options, but what: next node? contents of hallways up to next crossroad? full map network? What do we provide at act start? Same questions.
+* In combat, if we have a card that interacts with the draw or discard pile, do we provide their contents? How do we know which cards do this? Should we just always provide the contents of the pile? Right now we aren't worried about hitting token limits. The only consideration might be information overload -- the extra info distracts from what is important. But then, knowing what is in eaach might actually make for better decisions all around.
+
+#### Map screen
+
+Priority: **High-priority**
+
+A more complicated, already deferred feature. When at a crossroads, provide options, but what: next node? contents of hallways up to next crossroad? full map network? What do we provide at act start? Same questions.
+
+This is becoming a high priority implementation.
 
 ### ~~Update token usage~~
 
@@ -41,7 +55,7 @@ The GUI timezone reset element is not what was expected. It should be showing wh
 
 ### Flaws in Gemini's reasoning and understanding of game mechanics
 
-These represent a failure in the model's understanding of the game mechanics, and we need to find a way to correct it. We may need to provide more information about the game mechanics in the prompt, or we may need to adjust the model's training data (RAG learning).
+These represent a failure in the model's understanding of the game mechanics, and we need to find a way to correct it. We may need to provide more information about the game mechanics in the prompt, or we may need to adjust the model's training data (RAG learning). Work in this area will not be considered complete without thorough playtesting. It is an iteritive process, and will likely be one of the last issues closed.
 
     Work so far
 
@@ -103,12 +117,20 @@ Include the option to save this to a file or database. We can have separate file
 
 We may want a database of all learnings, as well as individual RAG files that are specific to each AI. Somewhere, we can use a higher-level Gemini model to analyze the summaries and create a "meta" summary that can be used to inform future runs. This could be a good use case for using our limited credits with better models.
 
+#### Addendum
+
+We already keep a state_of_the_game, but we should consider doing a summary at the end of each act as well. We will store these, plus the state_of_the_game. When the game is complete, through win or loss, we will feed all of these, as well as a full GameState, into a better model to create a summary of the entire run. This summary should be longer than the individual act summaries and the state_of_the_game.
+
+We will keep a database of all summaries, stored under a unique profile. All summaries generated under the profile represent the learnings of that particular 'personality' of the AI. At the start of each game, we will feed these into the AI to create a meta-summmary representing all knowledge of the AI. This should be relatively long. Upon game start, we will generate a state_of_the_game by feeding this 'personality' into the prompt along with the initial game state. This will help inform the run.
+
 ### Periodic "state-of the game" update
 
 ~~At certain intervals out of combat, have Gemini provide a summary of the current state of the game. This should be a high-level summary of the current strategy and outlook. It should not include things such as entire lists of cards in the deck, but it should include things such as current health, gold, important relics and cards central to the strategy, and any other relevant information. This could be useful for the player to get a sense of how the game is going and what they should be focusing on. This is a good place to use a better model, since it is a more strategic and high-level summary. We can also use this to inform the AI's decisions in future runs.~~ This is essentially implemented. It hasn't thoroughly been tested.
 
 ### User feedback and questions
 
-Include an input box in the GUI (or similar in terminal) where the user can provide feedback and ask questions. Since this is a coach, asking questions is important. Feedback provided can also be used when the AI gives its post-mortem. Also distingush between the player's input and the AI's output. We can have a "feedback" section in the GUI where the user can see the AI's responses to their questions and feedback. At minimum, use different colors for the player's input and the AI's output.
+~~Include an input box in the GUI (or similar in terminal) where the user can provide feedback and ask questions. Since this is a coach, asking questions is important. Feedback provided can also be used when the AI gives its post-mortem. Also distingush between the player's input and the AI's output. We can have a "feedback" section in the GUI where the user can see the AI's responses to their questions and feedback. At minimum, use different colors for the player's input and the AI's output.~~
 
-This could be useful for debugging, as I can ask Gemini what it currently knows (such as cards in the deck).
+~~This could be useful for debugging, as I can ask Gemini what it currently knows (such as cards in the deck).~~
+
+This has been implemented but needs some workshopping. Critically-- if the user gives valuable feedback, the AI should be able to apply it in future decisions immedietly. Discussions in the "Ask the Coach" area should not be fully sandboxed -- they should have an impact on future coaching. How we deal with that needs to be discussed -- do we keep a separate "learnings" that gets fed into the prompt?
