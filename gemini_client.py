@@ -26,11 +26,16 @@ from google import genai
 from google.genai import types, errors
 
 from dataclasses import dataclass
+from typing import Optional
 
 @dataclass
 class GeminiReply:
     text: str
     usage_metadata: object  # raw google.genai usage_metadata, or None
+    reasoning: Optional[str] = None  # thinking-mode trace, if the model
+                                      # returned one -- "best effort" per
+                                      # Google's docs, not guaranteed present
+                                      # on every call
 
 load_dotenv()
 
@@ -105,19 +110,22 @@ enemies' displayed incoming_damage and hits, compared to the player's \
 current hp and block. If your recommended sequence does not prevent \
 lethal damage and no other option does either, say so explicitly rather \
 than describing the sequence as safe.cl
-
-- Powers, Strength, Dexterity, and other buffs/debuffs gained during combat \
-(e.g. from cards like Spot Weakness, Flex, Inflame) last only for the \
-current fight, unless the source explicitly says "permanent" or affects \
-your deck/relics/max HP directly. Never advise saving cards or planning \
-around a combat buff carrying into the next encounter -- when a fight \
-ends, all such effects are gone.
-- Card reward screens (screen_type "CARD_REWARD") are always free -- taking \
-or skipping a card never costs or saves gold. Only SHOP_SCREEN involves \
-gold. Do not mention gold, saving gold, or affordability when advising on \
-a card reward; the only tradeoff is deck quality/thinning, not cost.
+- On turn 1 of a fight, enemy intent is often not yet known (shown as
+"UNKNOWN"). This does not mean the enemy is harmless -- never assume no
+threat just because intent is unresolved. Recommend cautious or
+defensive play when facing unknown intent, and note that the real
+intent will be visible starting turn 2.
 """
-
+# - Powers, Strength, Dexterity, and other buffs/debuffs gained during combat \
+# (e.g. from cards like Spot Weakness, Flex, Inflame) last only for the \
+# current fight, unless the source explicitly says "permanent" or affects \
+# your deck/relics/max HP directly. Never advise saving cards or planning \
+# around a combat buff carrying into the next encounter -- when a fight \
+# ends, all such effects are gone.
+# - Card reward screens (screen_type "CARD_REWARD") are always free -- taking \
+# or skipping a card never costs or saves gold. Only SHOP_SCREEN involves \
+# gold. Do not mention gold, saving gold, or affordability when advising on \
+# a card reward; the only tradeoff is deck quality/thinning, not cost.
 
 class GeminiClient:
     def __init__(self, api_key=None, model_name=MODEL_NAME):
@@ -130,7 +138,11 @@ class GeminiClient:
         self.client = genai.Client(api_key=api_key)
         self.model_name = model_name
         self._chat_config = types.GenerateContentConfig(
-            system_instruction=COACHING_SYSTEM_PROMPT
+            system_instruction=COACHING_SYSTEM_PROMPT,
+            thinking_config=types.ThinkingConfig(
+                thinking_level=config.THINKING_LEVEL,
+                include_thoughts=True,
+            ),
         )
         self._chat = None
 
@@ -182,7 +194,8 @@ class GeminiClient:
                 return GeminiReply(
                     text=response.text.strip(),
                     usage_metadata=getattr(response, "usage_metadata", None),
-                )
+                    reasoning=_extract_reasoning(response),
+            )
             except errors.APIError as e:
                 last_error = e
                 retryable = e.code == 429 or (e.code is not None and 500 <= e.code < 600)
@@ -194,3 +207,19 @@ class GeminiClient:
                 )
                 time.sleep(delay)
         raise last_error
+    
+def _extract_reasoning(response) -> Optional[str]:
+    """Pulls the thinking-mode trace out of the response, if present.
+    response.text appears (unconfirmed -- verify on first live call) to
+    already exclude thought-marked parts on its own; this walks the raw
+    parts directly instead of trusting that, so reasoning text can never
+    leak into the displayed advice even if that assumption is wrong."""
+    try:
+        parts = response.candidates[0].content.parts
+    except (AttributeError, IndexError, TypeError):
+        return None
+    thoughts = [
+        p.text for p in parts
+        if getattr(p, "thought", False) and getattr(p, "text", None)
+    ]
+    return "\n".join(thoughts) if thoughts else None

@@ -47,6 +47,14 @@ RETRY_MAX_ATTEMPTS = 3
 RETRY_BASE_DELAY_S = 2.0
 RETRY_MAX_DELAY_S = 20.0
 
+# Gemini 3-series "thinking" (extended reasoning before responding).
+# thinking_level is Gemini-3-only -- earlier models error if this is set.
+# Accepted values per Google's docs: "minimal", "low", "medium", "high"
+# for Flash-family models -- not yet confirmed against a live call for
+# gemini-3.1-flash-lite specifically. If the first real response errors
+# on this value, that's what to check first.
+THINKING_LEVEL = "high"
+
 
 def rate_limit_for(model_name: str) -> ModelRateLimit:
     """Falls back to DEFAULT_MODEL's limits for a model not yet in the

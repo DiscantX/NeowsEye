@@ -93,6 +93,13 @@ def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None):
 
             game_state = message.get("game_state", {})
 
+            if game_state.get("combat_state") is not None and not in_combat:
+                cs = game_state["combat_state"]
+                print(
+                    f"[debug] fresh combat poll: action_phase={game_state.get('action_phase')!r}, "
+                    f"hand_len={len(cs.get('hand', []))}, energy={cs.get('player', {}).get('energy')!r}",
+                    file=__import__('sys').stderr,
+                )
             should_prompt = trigger.should_prompt(game_state)
             was_in_combat = in_combat
 

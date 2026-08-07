@@ -70,6 +70,7 @@ class AdviceEvent:
                                # cumulative session/run totals against
                                # configured RPM/TPM limits
     latency_s: float          # wall time actually observed for this call
+    reasoning: Optional[str] = None  # thinking-mode trace, if returned
 
 
 @dataclass

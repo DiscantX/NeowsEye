@@ -59,6 +59,15 @@ class DecisionTrigger:
 
         if combat_state is not None:
             self._last_screen_key = None
+            if game_state.get("action_phase") != "WAITING_ON_USER":
+                # combat_state can already report the new turn number here
+                # even though the hand/energy haven't actually been dealt
+                # out yet (mid-resolution, draw animation, etc.) -- wait
+                # for the game to confirm it's genuinely our decision
+                # point before treating this as prompt-worthy. See the
+                # empty-hand/0-energy combat_start bug this was written
+                # to catch.
+                return False
             turn = combat_state.get("turn")
             is_new_turn = turn != self._last_combat_turn
             self._last_combat_turn = turn

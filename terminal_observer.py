@@ -17,6 +17,8 @@ class TerminalObserver(CoachingObserver):
             print(f"[Neow's Eye] {event.detail or 'Disconnected.'}")
 
     def on_advice_received(self, event: AdviceEvent) -> None:
+        if event.reasoning:
+            print(f"\n[Neow's Eye] (reasoning)\n{event.reasoning}")
         print(f"\n[Neow's Eye] {event.advice}\n")
 
     def on_error(self, event: ErrorEvent) -> None:

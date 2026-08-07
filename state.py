@@ -30,16 +30,14 @@ class Card:
     has_target: bool
     exhausts: bool
     ethereal: bool
-
+    
     @classmethod
     def from_dict(cls, data: dict) -> "Card":
         raw_name = data.get("name", data.get("id", "?"))
         return cls(
             uuid=data.get("uuid", ""),
             id=data.get("id", ""),
-            name=raw_name.rstrip("+"),  # CommunicationMod already appends "+" per
-                                        # upgrade to `name` -- upgrades is the only
-                                        # source of truth from here on
+            name=raw_name.rstrip("+"),
             type=data.get("type", ""),
             rarity=data.get("rarity", ""),
             cost=data.get("cost", -1),
@@ -162,12 +160,14 @@ class Monster:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Monster":
+        raw_intent = data.get("intent", "NONE")
+        intent = "UNKNOWN" if raw_intent == "DEBUG" else raw_intent
         return cls(
             name=data.get("name", data.get("id", "?")),
             current_hp=data.get("current_hp", 0),
             max_hp=data.get("max_hp", 0),
             block=data.get("block", 0),
-            intent=data.get("intent", "NONE"),
+            intent=intent,
             move_damage=data.get("move_adjusted_damage"),
             move_hits=data.get("move_hits"),
             half_dead=data.get("half_dead", False),

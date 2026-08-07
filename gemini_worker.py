@@ -138,7 +138,7 @@ class GeminiWorker:
             self._observer.on_advice_received(AdviceEvent(
                 seq=next_seq(), timestamp=time.monotonic(), prompt_seq=task.seq,
                 kind=task.kind, advice=reply.text, usage_metadata=reply.usage_metadata,
-                latency_s=latency,
+                latency_s=latency, reasoning=reply.reasoning,
             ))
 
     def _dispatch(self, task: _Task):
