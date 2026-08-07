@@ -54,6 +54,8 @@ class UsageEvent:
     requests_this_minute: int
     rpm_limit: int
     tokens_today: int
+    tokens_this_minute: int
+    tpm_limit: int
 
 @dataclass
 class AdviceEvent:

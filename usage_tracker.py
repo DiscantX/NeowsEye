@@ -40,6 +40,7 @@ class UsageTracker:
         self.rpd_limit = limits.rpd
 
         self._request_timestamps = deque()  # monotonic times, RPM window
+        self._token_timestamps = deque()    # (monotonic time, tokens) pairs, TPM window
         self._latencies = deque(maxlen=config.ETA_ROLLING_WINDOW)
         
         self.reset_timezone = reset_timezone or config.QUOTA_RESET_TIMEZONE
@@ -131,11 +132,18 @@ class UsageTracker:
     def record_request(self, latency_s: float, tokens: int = 0):
         with self._lock:
             self._roll_period_if_needed()
-            self._request_timestamps.append(time.monotonic())
+            now = time.monotonic()
+            self._request_timestamps.append(now)
+            self._token_timestamps.append((now, tokens))
             self._latencies.append(latency_s)
             self.requests_today += 1
             self.tokens_today += tokens
             self._save_state()
+
+    def tokens_this_minute(self) -> int:
+        with self._lock:
+            window_start = time.monotonic() - 60.0
+            return sum(t for ts, t in self._token_timestamps if ts >= window_start)
 
     def eta_seconds(self) -> float:
         with self._lock:
@@ -158,4 +166,6 @@ class UsageTracker:
                 "tokens_today": self.tokens_today,
                 "requests_this_minute": self.requests_this_minute(),
                 "rpm_limit": self.rpm_limit,
+                "tokens_this_minute": self.tokens_this_minute(),
+                "tpm_limit": self.tpm_limit,
             }

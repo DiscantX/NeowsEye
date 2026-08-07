@@ -366,7 +366,7 @@ class CoachOverlay(tk.Tk):
         self.token_frame.pack(side=tk.RIGHT)
 
         tk.Label(
-            self.token_frame, text="TOKENS", font=self.small_font,
+            self.token_frame, text="TPM", font=self.small_font,
             fg=self.config_data.dim_color, bg=self.config_data.bg_color,
         ).pack(anchor=tk.E)
 
@@ -396,6 +396,12 @@ class CoachOverlay(tk.Tk):
             fg=self.config_data.dim_color, bg=self.config_data.bg_color,
         )
         self.rate_minute_label.pack(side=tk.RIGHT)
+        
+        self.daily_tokens_label = tk.Label(
+            rate_row, text="0 tokens today", font=self.small_font,
+            fg=self.config_data.dim_color, bg=self.config_data.bg_color,
+        )
+        self.daily_tokens_label.pack(side=tk.LEFT, padx=(12, 0))
 
     # ── Reset timer ──
         self.reset_rule_button = tk.Menubutton(
@@ -682,6 +688,12 @@ class CoachOverlay(tk.Tk):
                      else self.config_data.error_color)
             self.rate_daily_label.config(text=f"Today: {requests_today} / {daily_limit}", fg=color)
             self.rate_minute_label.config(text=f"{requests_this_minute} / {rpm_limit} RPM")
+        self.after(0, _update)
+        
+    def update_daily_tokens(self, tokens_today: int):
+        def _update():
+            display = f"{tokens_today/1000:.1f}k" if tokens_today >= 1000 else str(tokens_today)
+            self.daily_tokens_label.config(text=f"{display} tokens today")
         self.after(0, _update)
 
     def feedback_status(self, message: str):

@@ -33,10 +33,13 @@ class Card:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Card":
+        raw_name = data.get("name", data.get("id", "?"))
         return cls(
             uuid=data.get("uuid", ""),
             id=data.get("id", ""),
-            name=data.get("name", data.get("id", "?")),
+            name=raw_name.rstrip("+"),  # CommunicationMod already appends "+" per
+                                        # upgrade to `name` -- upgrades is the only
+                                        # source of truth from here on
             type=data.get("type", ""),
             rarity=data.get("rarity", ""),
             cost=data.get("cost", -1),
@@ -62,11 +65,13 @@ class Card:
 
     def to_prompt_dict(self, quantity: int = 1) -> dict:
         d = {
-            "name": self.name + ("+" if self.upgrades else ""),
-            "cost": self.cost,
+            "name": self.name + ("+" * self.upgrades if self.upgrades else ""),
+            "cost": "X" if self.cost == -1 else self.cost,
             "playable": self.is_playable,
             "quantity": quantity,
         }
+        if self.cost == -1:
+            d["variable_cost"] = True
         if self.exhausts:
             d["exhausts"] = True
         if self.ethereal:
@@ -75,31 +80,10 @@ class Card:
 
     def to_deck_entry(self, quantity: int = 1) -> dict:
         return {
-            "name": self.name + ("+" if self.upgrades else ""),
-            "cost": self.cost,
+            "name": self.name + ("+" * self.upgrades if self.upgrades else ""),
+            "cost": "X" if self.cost == -1 else self.cost,
             "quantity": quantity,
         }
-
-def to_prompt_dict(self, quantity: int = 1) -> dict:
-        d = {
-            "name": self.name,
-            "cost": self.cost,
-            "playable": self.is_playable,
-            "quantity": quantity,
-        }
-        if self.exhausts:
-            d["exhausts"] = True
-        if self.ethereal:
-            d["ethereal"] = True
-        return d
-
-def to_deck_entry(self, quantity: int = 1) -> dict:
-    return {
-        "name": self.name,
-        "cost": self.cost,
-        "quantity": quantity,
-    }
-
 
 def dedupe_cards(cards: list) -> list:
     """Collapse a list of Card objects into (card, quantity) pairs,

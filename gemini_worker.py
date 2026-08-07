@@ -125,13 +125,14 @@ class GeminiWorker:
 
             latency = time.monotonic() - start
             self._usage.record_request(latency_s=latency, tokens=_total_tokens(reply.usage_metadata))
-
+            
             usage = self._usage.snapshot()
             self._observer.on_usage_update(UsageEvent(
                 seq=next_seq(), timestamp=time.monotonic(),
                 requests_today=usage["requests_today"], daily_limit=usage["rpd_limit"],
                 requests_this_minute=usage["requests_this_minute"], rpm_limit=usage["rpm_limit"],
                 tokens_today=usage["tokens_today"],
+                tokens_this_minute=usage["tokens_this_minute"], tpm_limit=usage["tpm_limit"],
             ))
 
             self._observer.on_advice_received(AdviceEvent(

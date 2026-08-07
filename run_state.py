@@ -72,6 +72,30 @@ def _fingerprint(value):
 
     return json.dumps(value, default=default, sort_keys=True)
 
+def _priced_card(data: dict) -> dict:
+    d = Card.from_dict(data).to_prompt_dict()
+    d["price"] = data.get("price")
+    return d
+
+
+def _priced_relic(data: dict) -> dict:
+    d = Relic.from_dict(data).to_prompt_dict()
+    d["price"] = data.get("price")
+    return d
+
+
+def _priced_potion(data: dict) -> dict:
+    d = Potion.from_dict(data).to_prompt_dict()
+    d["price"] = data.get("price")
+    return d
+
+
+SCREENS_REQUIRING_GOLD = {"SHOP_SCREEN"}  # gold must be present even when
+                                            # unchanged -- Gemini needs the
+                                            # hard number to reason about
+                                            # affordability, not just deltas
+
+
 
 class CombatState:
     """One fight's worth of state. Constructed when combat_state first
@@ -335,14 +359,74 @@ class RunState:
         return payload
 
     def noncombat_payload(self) -> dict:
-        """Sent for a decision screen (card reward, shop, campfire,
-        event...). Only dirty run-level fields -- with a long-lived
-        Gemini session, deck/relics/potions that haven't changed since
-        last mentioned don't need to be resent here."""
-        payload = {
-            "event": "decision_screen",
-            "screen_type": self.screen_type,
-            "screen_state": self.screen_state,
-        }
-        payload.update(self._run_level_payload(self.dirty))
-        return payload
+            """Sent for a decision screen (card reward, shop, campfire,
+            event...). Only dirty run-level fields -- with a long-lived
+            Gemini session, deck/relics/potions that haven't changed since
+            last mentioned don't need to be resent here."""
+            payload = {
+                "event": "decision_screen",
+            }
+            payload.update(self._run_level_payload(self.dirty))
+            if self.screen_type in SCREENS_REQUIRING_GOLD and "gold" not in payload:
+                payload["gold"] = self.gold
+            payload["screen_type"] = self.screen_type
+            payload["screen_state"] = self._screen_state_payload()
+            return payload
+
+    def _screen_state_payload(self) -> dict:
+        """Per-screen_type cleanup of screen_state, replacing the raw
+        CommunicationMod dict with a version routed through Card/Relic/
+        Potion (dropping uuid, normalizing upgrade markers) -- same
+        treatment CombatState already gives combat cards.
+
+        SCOPE: only CARD_REWARD and SHOP_SCREEN are covered. Every other
+        screen_type in decision_trigger.NON_COMBAT_DECISION_SCREENS
+        (REST, EVENT, BOSS_REWARD, GRID, HAND_SELECT) still falls
+        through to the raw dict, uuid and all -- a real per-screen-type
+        builder covering all of them is still owed; this only patches
+        the two most active cases.
+
+        FLAGGED UNCERTAIN: the shop/card-reward field names below
+        (price, skip_available, bowl_available, purge_available/
+        purge_cost) are built from CommunicationMod's documented
+        schema, not a confirmed live capture -- verify before trusting
+        them, same caveat as Orb in state.py.
+        """
+        raw = self.screen_state or {}
+
+        if self.screen_type == "CARD_REWARD":
+            return {
+                "cards": [Card.from_dict(c).to_prompt_dict() for c in raw.get("cards", [])],
+                "can_skip": raw.get("skip_available", True),
+                "can_bowl": raw.get("bowl_available", False),
+            }
+
+        if self.screen_type == "SHOP_SCREEN":
+            return {
+                "cards": [_priced_card(c) for c in raw.get("cards", [])],
+                "relics": [_priced_relic(r) for r in raw.get("relics", [])],
+                "potions": [_priced_potion(p) for p in raw.get("potions", [])],
+                "purge_available": raw.get("purge_available", False),
+                "purge_cost": raw.get("purge_cost"),
+            }
+            
+        if self.screen_type == "GRID":
+                    if raw.get("for_purge"):
+                        flavor = "purge"
+                    elif raw.get("for_upgrade"):
+                        flavor = "upgrade"
+                    elif raw.get("for_transform"):
+                        flavor = "transform"
+                    else:
+                        flavor = "other"
+                    return {
+                        "flavor": flavor,
+                        "cards": [Card.from_dict(c).to_prompt_dict() for c in raw.get("cards", [])],
+                        "num_cards": raw.get("num_cards", 1),  # how many selections this
+                                                                # screen wants (purge is
+                                                                # usually 1; some
+                                                                # upgrade/transform
+                                                                # variants allow more)
+                    }            
+
+        return raw  # unmodified for every other screen_type -- see docstring

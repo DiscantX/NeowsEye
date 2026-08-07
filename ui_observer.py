@@ -128,6 +128,8 @@ class UIObserver(CoachingObserver):
                 rpm_limit=event.rpm_limit,
                 tokens_today=event.tokens_today,
             )
+            self._overlay.update_tokens(event.tokens_this_minute, event.tpm_limit)
+            self._overlay.update_daily_tokens(event.tokens_today)
 
     def _get_prompt_for_seq(self, seq: int) -> Optional[str]:
         """Helper to retrieve stored prompt text."""
