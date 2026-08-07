@@ -405,6 +405,38 @@ class RunState:
             payload["screen_state"] = self._screen_state_payload()
             return payload
 
+    def player_message_payload(self, message: str, message_type: str) -> dict:
+        """Payload for a player-initiated question or piece of feedback
+        from the GUI's chat panel. Always sends the FULL run-level
+        snapshot (TRACKED_FIELDS, not self.dirty) -- same reasoning as
+        combat_intro_payload()/noncombat_payload(): whichever session
+        this rides (a fresh one-off out of combat, or the open combat
+        session) can't be assumed to already know anything.
+
+        Also attaches the most recent completed combat's recap (if any)
+        and the current fight's live state (if one is in progress) --
+        this defines the actual scope of what Gemini can answer about
+        past decisions. The system prompt's player_message rules must
+        stay in sync with exactly what's attached here.
+        """
+        payload = {
+            "event": "player_message",
+            "message_type": message_type,  # "question" | "feedback"
+            "message": message,
+        }
+        payload.update(self._run_level_payload(self.TRACKED_FIELDS))
+        if self.strategic_summary:
+            payload["state_of_the_game"] = self.strategic_summary
+
+        combat_recaps = [e for e in self.summary_log if e["kind"] == "combat"]
+        if combat_recaps:
+            payload["last_combat_recap"] = combat_recaps[-1]["text"]
+
+        if self.combat is not None:
+            payload["current_combat"] = self.combat.full_payload()
+
+        return payload
+
     def _screen_state_payload(self) -> dict:
         """Per-screen_type cleanup of screen_state, replacing the raw
         CommunicationMod dict with a version routed through Card/Relic/

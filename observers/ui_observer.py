@@ -17,7 +17,7 @@ import threading
 import time
 
 from observers.coaching_observer import (
-    AdviceEvent, CoachingObserver, ConnectionEvent, ErrorEvent, PromptEvent, UsageEvent,
+    AdviceEvent, CoachingObserver, ConnectionEvent, ErrorEvent, PromptEvent, UsageEvent, SummaryEvent
 )
 from gemini.gemini_client import GeminiReply
 from gui.tkinter_app import CoachOverlay
@@ -92,15 +92,18 @@ class UIObserver(CoachingObserver):
         This is the MAIN UI update - everything the user actually sees
         comes through here: actual coaching tips, recommendations, strategies.
 
+        player_message replies go to the chat drawer instead of the main
+        COACH FEEDBACK panel -- they're a response to something the
+        player typed, not unprompted turn/decision advice.
+
         We also update tokens and ETA when advice arrives.
         """
         with self._lock:
-            # Update the main feedback display
-            self._overlay.update_feedback(event.advice)
+            if event.kind == "player_message":
+                self._overlay.append_chat_message("coach", event.advice)
+            else:
+                self._overlay.update_feedback(event.advice)
 
-            # Clear ETA after response arrives -- routed through the
-            # thread-safe helper rather than touching eta_label/eta_bar
-            # directly, since this method runs on GeminiWorker's thread.
             self._overlay.set_eta_ready()
             self._overlay.feedback_status(f"Response received (lat {event.latency_s:.1f}s)")
 

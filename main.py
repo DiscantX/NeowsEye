@@ -46,7 +46,8 @@ def build_default_observer() -> ObserverBroadcaster:
     return ObserverBroadcaster([TerminalObserver()])
 
 
-def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None):
+def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None,
+         on_worker_ready=None, on_run_state_ready=None):
     observer = observer or build_default_observer()
 
     client = StreamClient()
@@ -68,9 +69,13 @@ def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None):
     if on_usage_tracker_ready:
         on_usage_tracker_ready(usage_tracker)
     worker = GeminiWorker(gemini, observer, usage_tracker)
+    if on_worker_ready:
+        on_worker_ready(worker)
     worker.start()
 
     run_state = RunState()
+    if on_run_state_ready:
+        on_run_state_ready(run_state)
     
     trigger = DecisionTrigger()
     observer.add(_RunStateUpdater(run_state))

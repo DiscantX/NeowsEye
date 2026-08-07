@@ -37,6 +37,8 @@ def main():
     # this dict is just a mutable box the two closures below can share.
     client_holder = {}
     tracker_holder = {}
+    worker_holder = {}
+    run_state_holder = {}
 
     def handle_close():
         client = client_holder.get("client")
@@ -52,7 +54,24 @@ def main():
         # own label already updated, and set_reset_rule() will apply
         # once the run actually starts, so silently no-op is fine here.
 
-    overlay = CoachOverlay(on_close=handle_close, on_reset_rule_change=handle_reset_rule_change)
+    def handle_send_message(text, message_type):
+        # worker/run_state live on main.py's background thread -- both
+        # holders are simple mutable dicts (no lock), same pattern as
+        # client_holder/tracker_holder above. If either isn't ready yet
+        # (player types before CommunicationMod connects), no-op --
+        # CoachOverlay already shows a "not connected yet" message.
+        worker = worker_holder.get("worker")
+        run_state = run_state_holder.get("run_state")
+        if not worker or not run_state:
+            return
+        payload = run_state.player_message_payload(text, message_type)
+        worker.submit_player_message(payload)
+
+    overlay = CoachOverlay(
+        on_close=handle_close,
+        on_reset_rule_change=handle_reset_rule_change,
+        on_send_message=handle_send_message,
+    )
     
     # Terminal output is kept alongside the GUI -- useful for anyone
     # running this from a console for extra visibility/debugging,
@@ -65,6 +84,8 @@ def main():
         kwargs={
             "on_client_ready": lambda c: client_holder.update(client=c),
             "on_usage_tracker_ready": lambda t: tracker_holder.update(tracker=t),
+            "on_worker_ready": lambda w: worker_holder.update(worker=w),
+            "on_run_state_ready": lambda rs: run_state_holder.update(run_state=rs),
         },
         daemon=True,
     )

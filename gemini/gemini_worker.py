@@ -69,6 +69,9 @@ class GeminiWorker:
     def submit_end_combat(self, prior_state_summary: str = "") -> int:
         return self._submit("end_combat", {"prior_state_summary": prior_state_summary})
 
+    def submit_player_message(self, payload: dict) -> int:
+        return self._submit("player_message", payload)
+
     def _submit(self, kind, payload) -> int:
         seq = next_seq()
         task = _Task(kind, payload, seq)
@@ -164,6 +167,8 @@ class GeminiWorker:
             return self._gemini.one_off(task.payload)
         if task.kind == "end_combat":
             return self._gemini.end_combat(task.payload.get("prior_state_summary", ""))
+        if task.kind == "player_message":
+            return self._gemini.player_message(task.payload)
         raise ValueError(f"Unknown task kind: {task.kind}")
 
 

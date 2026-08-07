@@ -14,7 +14,8 @@ the game or CommunicationMod. Only one client is served at a time; a new
 connection replaces the previous one.
 
 To run this as a subprocess of CommunicationMod, you must point the mod's
-`config.properties` file to this file.
+`config.properties` file to this file. On Windows, the file can be found at:
+%LOCALAPPDATA%\\ModTheSpire\\CommunicationMod
 
 Instructions can be found at: https://github.com/ForgottenArbiter/CommunicationMod
 
@@ -27,7 +28,7 @@ import socket
 import sys
 import threading
 
-from net.stream_peer import StreamPeer, HOST, PORT
+from stream_peer import StreamPeer, HOST, PORT
 
 
 class StreamAdapter(StreamPeer):

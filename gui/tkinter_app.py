@@ -18,6 +18,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime
 
+# Flip this to False if you want the chat/question drawer collapsed by
+# default at launch instead of open.
+DEFAULT_DRAWER_OPEN = True
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -30,6 +33,7 @@ class OverlayConfig:
     min_height: int = 510
     offset_x: int = -540  # Right-aligned offset from right edge
     offset_y: int = 80    # From top edge
+    drawer_width: int = 260  # width of the chat/question drawer panel
     bg_color: str = "#1a1a1a"
     fg_color: str = "#e0e0e0"
     accent_color: str = "#00ffcc"
@@ -89,7 +93,8 @@ def _resolve_font_family(preferred: str) -> str:
 class CoachOverlay(tk.Tk):
     """Main overlay window that stays always-on-top."""
 
-    def __init__(self, config: Optional[OverlayConfig] = None, on_close=None, on_reset_rule_change=None):
+    def __init__(self, config: Optional[OverlayConfig] = None, on_close=None,
+                 on_reset_rule_change=None, on_send_message=None):
         super().__init__()
 
         self.config_data = config or OverlayConfig()
@@ -99,10 +104,21 @@ class CoachOverlay(tk.Tk):
         # so the background coaching loop shuts down cleanly instead of
         # being left blocked on a read that will never resolve.
         self._on_close_callback = on_close
+        # Called with (message_text, message_type) when the player sends
+        # a chat drawer message -- gui_main.py wires this to
+        # GeminiWorker.submit_player_message(). None-safe: see
+        # _handle_send() for the not-connected-yet fallback.
+        self._on_send_message = on_send_message
+
+        # Must be set before _setup_window()/_position_window() -- both
+        # need the drawer's initial state to compute correct geometry.
+        self._drawer_open = DEFAULT_DRAWER_OPEN
+
         self._setup_window()
         self._setup_fonts()
         self._setup_styles()
         self._create_widgets()
+        self._create_drawer_widgets()
         self._create_layout()
 
         # Data state
@@ -137,8 +153,13 @@ class CoachOverlay(tk.Tk):
         # (rather than color-keyed/irregular) window shape.
         self.attributes('-alpha', self.config_data.opacity)
 
-        # Set geometry
-        self.geometry(f"{self.config_data.width}x{self.config_data.height}")
+        # Set geometry -- includes the drawer's width up front if it's
+        # open by default, so the window doesn't visibly resize on
+        # first paint.
+        initial_width = self.config_data.width + (
+            self.config_data.drawer_width if self._drawer_open else 0
+        )
+        self.geometry(f"{initial_width}x{self.config_data.height}")
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -265,6 +286,19 @@ class CoachOverlay(tk.Tk):
             command=self._on_close,
         )
         self.close_button.pack(side=tk.RIGHT, padx=2)
+
+        self.drawer_toggle_button = tk.Button(
+            self.title_bar,
+            text="Chat «" if self._drawer_open else "Chat »",
+            font=self.mini_font,
+            fg=self.config_data.accent_color,
+            bg=self.config_data.border_color,
+            activebackground=self.config_data.border_color,
+            activeforeground=self.config_data.fg_color,
+            relief=tk.FLAT, bd=0, cursor="hand2",
+            command=self._toggle_drawer,
+        )
+        self.drawer_toggle_button.pack(side=tk.RIGHT, padx=(0, 4))
 
         # Dragging is bound only to the title bar (not the whole
         # window) -- binding it on self previously meant every click
@@ -471,14 +505,95 @@ class CoachOverlay(tk.Tk):
 
         self._add_borders()
 
+    def _create_drawer_widgets(self):
+        """Builds the chat/question drawer -- a separate root-level
+        frame (sibling of main_frame, not nested inside it) so it can
+        be packed/unpacked independently in _set_drawer_visible()
+        without disturbing the main panel's layout. Fixed width via
+        pack_propagate(False); toggling grows/shrinks the WINDOW, not
+        this frame -- see _set_drawer_visible()."""
+        self.drawer_frame = tk.Frame(
+            self, bg=self.config_data.bg_color, width=self.config_data.drawer_width,
+        )
+        self.drawer_frame.pack_propagate(False)
+
+        header = tk.Frame(self.drawer_frame, bg=self.config_data.border_color, height=22)
+        header.pack_propagate(False)
+        header.pack(fill=tk.X, side=tk.TOP)
+        tk.Label(
+            header, text="ASK THE COACH", font=self.label_font,
+            fg=self.config_data.accent_color, bg=self.config_data.border_color,
+        ).pack(side=tk.LEFT, padx=8)
+
+        chat_container = tk.Frame(self.drawer_frame, bg=self.config_data.bg_color)
+        chat_container.pack(fill=tk.BOTH, expand=True, padx=8, pady=(6, 4))
+        chat_box, self.chat_text = self._make_scrollable_text(
+            chat_container, height=10,
+            fg_color=self.config_data.fg_color, font=self.small_font,
+        )
+        chat_box.pack(fill=tk.BOTH, expand=True)
+        self.chat_text.tag_configure(
+            'player', foreground=self.config_data.fg_color, font=self.small_font,
+        )
+        self.chat_text.tag_configure(
+            'coach', foreground=self.config_data.feedback_color, font=self.small_font,
+        )
+        self.chat_text.tag_configure(
+            'chat_label', foreground=self.config_data.dim_color, font=self.mini_font,
+        )
+
+        # Question / Feedback -- both go through the same player_message
+        # task kind; message_type is carried in the payload for the
+        # system prompt to key off of.
+        self.message_type_var = tk.StringVar(value="question")
+        type_row = tk.Frame(self.drawer_frame, bg=self.config_data.bg_color)
+        type_row.pack(fill=tk.X, padx=8, pady=(0, 4))
+        for label, value in (("Question", "question"), ("Feedback", "feedback")):
+            tk.Radiobutton(
+                type_row, text=label, value=value, variable=self.message_type_var,
+                font=self.mini_font, fg=self.config_data.fg_color,
+                bg=self.config_data.bg_color, activebackground=self.config_data.bg_color,
+                selectcolor=self.config_data.border_color, relief=tk.FLAT,
+            ).pack(side=tk.LEFT, padx=(0, 8))
+
+        input_row = tk.Frame(self.drawer_frame, bg=self.config_data.bg_color)
+        input_row.pack(fill=tk.X, padx=8, pady=(0, 8))
+        self.chat_entry = tk.Entry(
+            input_row, font=self.small_font, bg=self.config_data.bg_color,
+            fg=self.config_data.fg_color, insertbackground=self.config_data.fg_color,
+            relief=tk.FLAT, highlightthickness=1,
+            highlightbackground=self.config_data.border_color,
+            highlightcolor=self.config_data.accent_color,
+        )
+        self.chat_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
+        self.chat_entry.bind('<Return>', lambda event: self._handle_send())
+
+        send_button = tk.Button(
+            input_row, text="Send", font=self.mini_font,
+            fg=self.config_data.accent_color, bg=self.config_data.border_color,
+            activebackground=self.config_data.border_color,
+            activeforeground=self.config_data.fg_color,
+            relief=tk.FLAT, bd=0, cursor="hand2",
+            command=self._handle_send,
+        )
+        send_button.pack(side=tk.RIGHT, padx=(6, 0))
+
     def _add_divider(self):
         tk.Frame(self.main_frame, bg=self.config_data.border_color, height=1).pack(fill=tk.X, padx=10)
 
     def _create_layout(self):
         """Title bar is already packed first in _create_widgets, so it
         claims the top slot before any other TOP-side child of
-        main_frame does."""
-        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        main_frame does.
+
+        drawer_frame and main_frame are both direct children of self,
+        packed side-by-side -- drawer_frame first (if open by default)
+        so it lands on the left, main_frame second with fill=BOTH/
+        expand=True to claim the remaining width. See
+        _set_drawer_visible() for runtime toggling."""
+        if self._drawer_open:
+            self.drawer_frame.pack(side=tk.LEFT, fill=tk.Y)
+        self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
     def _add_borders(self):
         """Add subtle border highlights around the window."""
@@ -490,11 +605,16 @@ class CoachOverlay(tk.Tk):
         bottom_border.place(x=0, rely=1.0, y=-1, relwidth=1.0)
 
     def _position_window(self):
-        """Position window relative to game or screen."""
+        """Position window relative to game or screen. The drawer grows
+        the window LEFTWARD -- if it's open at launch, x is shifted
+        left by its width up front, keeping the coaching panel's right
+        edge at the same screen position it'd occupy with the drawer
+        closed."""
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
 
-        x = screen_width + self.config_data.offset_x
+        drawer_offset = self.config_data.drawer_width if self._drawer_open else 0
+        x = screen_width + self.config_data.offset_x - drawer_offset
         y = self.config_data.offset_y
 
         if x < 0:
@@ -549,6 +669,77 @@ class CoachOverlay(tk.Tk):
             self._on_close_callback()
         self._running = False
         self.destroy()
+
+    # ─── Drawer (chat / question panel) ────────────────────────────────────
+
+    def _toggle_drawer(self):
+        self._set_drawer_visible(not self._drawer_open)
+
+    def _set_drawer_visible(self, visible: bool):
+        """Grows/shrinks the WINDOW leftward, not the drawer's own
+        packed width -- drawer_frame stays a fixed drawer_width
+        throughout; what changes is whether it's packed at all, and how
+        far left the window's corner sits. Mirrors the math in
+        _position_window()."""
+        if visible == self._drawer_open:
+            return
+
+        current_x = self.winfo_x()
+        current_y = self.winfo_y()
+        current_width = self.winfo_width()
+        current_height = self.winfo_height()
+        delta = self.config_data.drawer_width
+
+        if visible:
+            self.drawer_frame.pack(side=tk.LEFT, fill=tk.Y, before=self.main_frame)
+            new_x = current_x - delta
+            new_width = current_width + delta
+        else:
+            self.drawer_frame.pack_forget()
+            new_x = current_x + delta
+            new_width = current_width - delta
+
+        self._drawer_open = visible
+        self.geometry(f"{new_width}x{current_height}+{new_x}+{current_y}")
+        self.drawer_toggle_button.config(text="Chat «" if visible else "Chat »")
+
+    def _handle_send(self):
+        """Bound to the Send button and <Return> in the chat entry."""
+        text = self.chat_entry.get().strip()
+        if not text:
+            return
+        message_type = self.message_type_var.get()
+
+        self.append_chat_message("player", text, type_label=message_type)
+        self.chat_entry.delete(0, tk.END)
+
+        if self._on_send_message:
+            self._on_send_message(text, message_type)
+        else:
+            self.append_chat_message("coach", "(not connected yet -- try again in a moment)")
+
+    def append_chat_message(self, role: str, text: str, type_label: Optional[str] = None):
+        """Thread-safe: appends one entry to the drawer's chat history.
+        role is 'player' or 'coach'. Called directly (main thread) from
+        _handle_send() for the player's own echo, and via GeminiWorker's
+        thread -> UIObserver for the model's reply -- see
+        ui_observer.py's on_advice_received()."""
+        def _update():
+            label = "You" if role == "player" else "Coach"
+            if type_label:
+                label += f" ({type_label})"
+            was_at_bottom = self._is_scrolled_to_bottom(self.chat_text)
+
+            self.chat_text.config(state=tk.NORMAL)
+            if self.chat_text.index('end-1c') != '1.0':
+                self.chat_text.insert(tk.END, "\n\n")
+            self.chat_text.insert(tk.END, f"{label}\n", 'chat_label')
+            self.chat_text.insert(tk.END, text, role)
+            self.chat_text.config(state=tk.DISABLED)
+
+            if was_at_bottom:
+                self.chat_text.see(tk.END)
+        self.after(0, _update)
 
     # ─── Public API Methods ────────────────────────────────────────────────
 

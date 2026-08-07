@@ -92,6 +92,18 @@ prior summary of the run's strategy so far, carried forward from earlier \
 combats. Treat it as trusted context about your own past reasoning, not \
 something to re-derive from scratch.
 
+For a player-initiated message (event: "player_message"), "message_type" is \
+either "question" (answer it directly and helpfully) or "feedback" \
+(acknowledge briefly and let it inform decisions going forward -- no need \
+to defend or re-litigate a past recommendation). You have access to the \
+CURRENT combat if one is in progress ("current_combat"), a recap of the \
+MOST RECENT completed fight ("last_combat_recap", if any), and your \
+"state_of_the_game" summary. You do NOT have turn-by-turn detail from any \
+fight before the most recent one. If asked about something outside that \
+scope, say plainly that you don't have those specifics anymore -- mention \
+you only retain the current fight, the last fight's recap, and the overall \
+run summary -- rather than guessing.
+
 Keep every reply to 2-4 sentences. No preamble, no restating the state \
 back to the player.
 
@@ -253,6 +265,19 @@ class GeminiClient:
             model=self.model_name, config=self._chat_config
         )
         return self._ask(context, chat)
+
+    def player_message(self, payload: dict) -> "GeminiReply":
+        """Player-initiated question or feedback from the GUI's chat
+        panel. Rides the CURRENT combat's chat session if one is open,
+        otherwise opens a one-off session, same as non-combat decision
+        screens. Either way, run_state.player_message_payload() already
+        attached full run-level context plus the last combat's recap."""
+        if self._chat is not None:
+            return self._ask(payload, self._chat)
+        chat = self.client.chats.create(
+            model=self.model_name, config=self._chat_config
+        )
+        return self._ask(payload, chat)
 
     @staticmethod
     def _ask(payload: dict, chat) -> "GeminiReply":
