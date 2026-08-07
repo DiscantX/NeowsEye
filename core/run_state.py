@@ -359,11 +359,16 @@ class RunState:
 
     def combat_intro_payload(self) -> dict:
         """Sent once, when a fresh CombatState is created (chats.create()
-        time in gemini_client.py). Full run-level state (first time or
-        whatever's dirty since we last synced) + full combat snapshot."""
+        time in gemini_client.py). start_combat() always opens a brand-new
+        chat session -- Gemini has no memory of any prior conversation --
+        so the run-level portion must be the FULL picture (TRACKED_FIELDS),
+        not just self.dirty. Dirty-tracking is only valid for payloads sent
+        into an ALREADY-OPEN session (see turn_delta_payload()); a fresh
+        session needs everything regardless of what's changed since the
+        last time some other session was told about it."""
         assert self.combat is not None
         payload = {"event": "combat_start"}
-        payload.update(self._run_level_payload(self.dirty))
+        payload.update(self._run_level_payload(self.TRACKED_FIELDS))
         if self.strategic_summary:
             payload["state_of_the_game"] = self.strategic_summary
         payload.update(self.combat.full_payload())
@@ -381,13 +386,17 @@ class RunState:
 
     def noncombat_payload(self) -> dict:
             """Sent for a decision screen (card reward, shop, campfire,
-            event...). Only dirty run-level fields -- with a long-lived
-            Gemini session, deck/relics/potions that haven't changed since
-            last mentioned don't need to be resent here."""
+            event...). one_off() opens a brand-new chat session every single
+            call -- there is no long-lived session here, so "only dirty
+            fields" was wrong: it silently omitted deck/relics/potions
+            whenever they hadn't changed since the last (unrelated,
+            already-closed) one-off session. Gemini never actually saw
+            those fields in this session, dirty or not, so this now always
+            sends the full run-level picture (TRACKED_FIELDS)."""
             payload = {
                 "event": "decision_screen",
             }
-            payload.update(self._run_level_payload(self.dirty))
+            payload.update(self._run_level_payload(self.TRACKED_FIELDS))
             if self.strategic_summary:
                 payload["state_of_the_game"] = self.strategic_summary
             if self.screen_type in SCREENS_REQUIRING_GOLD and "gold" not in payload:
