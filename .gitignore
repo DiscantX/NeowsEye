@@ -5,8 +5,11 @@ ENV/
 env/
 .vscode/
 .env
+data/
+.claude/
 
 *.pyc
+*.txt
 settings.json
 layout.json
 NeowsEye.code-workspace

@@ -56,7 +56,7 @@ forgotten):
 import json
 from typing import Optional
 
-from state import Card, Monster, Orb, Power, Potion, Relic, dedupe_cards
+from core.state import Card, Monster, Orb, Power, Potion, Relic, dedupe_cards
 
 
 def _fingerprint(value):

@@ -16,7 +16,7 @@ import threading
 import queue
 import time
 
-from stream_peer import StreamPeer, HOST, PORT
+from net.stream_peer import StreamPeer, HOST, PORT
 
 
 class StreamClient(StreamPeer):

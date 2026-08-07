@@ -11,29 +11,29 @@ This is a complicated question. We need to determine when to provide additional 
 * Provide cards in deck: Every combat start? Every card reward choice/shop? Never, does it track it fine on its own?
 * In combat, we need to reprompt when the situation changes mid-turn, such as drawing more cards.
 * In combat, if we have a card that interacts with the draw or discard pile, do we provide their contents? How do we know which cards do this?
-* Map screen -- a more complicated, already deferred feature. When at a crossroads, provide options, but what: next node? contents of hallways up to next crossroad? full map network? What do we provide at act start? Same questions.
+* **Map screen** -- a more complicated, already deferred feature. When at a crossroads, provide options, but what: next node? contents of hallways up to next crossroad? full map network? What do we provide at act start? Same questions.
 
-### Update token usage
+### ~~Update token usage~~
 
-This is currently a deferred task. We need to calculate token usage and display it in the GUI. Currently the UI element is a dead end.
+~~This is currently a deferred task. We need to calculate token usage and display it in the GUI. Currently the UI element is a dead end.~~
 
-### Reorganize project structure
+### ~~Reorganize project structure~~
 
-We currently have aa flat project structure. We should reorganize the project structure to be more modular and easier to navigate. This will make it easier to find and fix bugs, as well as to add new features.
+~~We currently have aa flat project structure. We should reorganize the project structure to be more modular and easier to navigate. This will make it easier to find and fix bugs, as well as to add new features.~~
 
-### Remove uui from prompt
+### Remove uuid from prompt
 
-We are currently including the uui of each card in the prompt. This is not necessary, and it is taking up valuable token space. We should remove the uui from the prompt, and only include the card name and any relevant information about the card.
+~~We are currently including the uuid of each card in the prompt. This is not necessary, and it is taking up valuable token space. We should remove the uuid from the prompt, and only include the card name and any relevant information about the card.~~ Fixed in most places. Worth keeping an eye on.
 
 ## Bugs
 
-### Extra `+` on upgraded cards
+### ~~Extra `+` on upgraded cards~~
 
-Gemini is sometimes giving upgraded cards an extra `+` in the name. (ie Bash++ instead of Bash+). Are we introducing that on the code level, or is it a bug in the model's understanding of the card names?
+~~Gemini is sometimes giving upgraded cards an extra `+` in the name. (ie Bash++ instead of Bash+). Are we introducing that on the code level, or is it a bug in the model's understanding of the card names?~~
 
-### Variable energy cards
+### ~~Variable energy cards~~
 
-Cards that have variable energy, such as Whirlwind's "Deal 8 damage to all enemies x times", show an energy value of -1 in the prompt. We previously flagged this. The AI does not always know what this meaans; interstingly, it did seem to learn after we used it the first time, though this is not confirmed to be consistent behavior.
+~~Cards that have variable energy, such as Whirlwind's "Deal 8 damage to all enemies x times", show an energy value of -1 in the prompt. We previously flagged this. The AI does not always know what this means; interstingly, it did seem to learn after we used it the first time, though this is not confirmed to be consistent behavior.~~
 
 ### Reset timezone
 
@@ -42,6 +42,10 @@ The GUI timezone reset element is not what was expected. It should be showing wh
 ### Flaws in Gemini's reasoning and understanding of game mechanics
 
 These represent a failure in the model's understanding of the game mechanics, and we need to find a way to correct it. We may need to provide more information about the game mechanics in the prompt, or we may need to adjust the model's training data (RAG learning).
+
+    Work so far
+
+    We have moved toward a reasoning model, which has helped in many instances, particularly with math. However, some of these are flaws in the AI's understanding of the game mechanics itself. We are handling this by providing additional in the prompt, and will monitor through playtests.
 
 #### Gemini's understanding of card ordering
 
@@ -95,13 +99,13 @@ Feed a copy of the Fandom wiki to Gemini using the API at the start of each run.
 
 At the end of eaach run, have Gemini summarize the run. Treat it like a post-mortem. What went well, what went poorly, what could have been done differently. Include both strategic insights as well as blunders the AI made in its assumptions about how the game works. This could be used to improve the model's performance in future runs. We could also use this to create a RAG (Retrieval-Augmented Generation) system where we store these summaries and use them to inform future runs.
 
-Include the option to save this to a file or database. We can have sepaarate files, such that each represents a different "AI" profile. This way we can have different AI personalities, and we can also have a "meta" AI that learns from the summaries of all the other AIs.
+Include the option to save this to a file or database. We can have separate files, such that each represents a different "AI" profile. This way we can have different AI personalities, and we can also have a "meta" AI that learns from the summaries of all the other AIs.
 
 We may want a database of all learnings, as well as individual RAG files that are specific to each AI. Somewhere, we can use a higher-level Gemini model to analyze the summaries and create a "meta" summary that can be used to inform future runs. This could be a good use case for using our limited credits with better models.
 
 ### Periodic "state-of the game" update
 
-At certain intervals out of combat, have Gemini provide a summary of the current state of the game. This should be a high-level summary of the current strategy and outlook. It should not include things such as entire lists of cards in the deck, but it should include things such as current health, gold, important relics and cards central to the strategy, and any other relevant information. This could be useful for the player to get a sense of how the game is going and what they should be focusing on. This is a good place to use a better model, since it is a more strategic and high-level summary. We can also use this to inform the AI's decisions in future runs.
+~~At certain intervals out of combat, have Gemini provide a summary of the current state of the game. This should be a high-level summary of the current strategy and outlook. It should not include things such as entire lists of cards in the deck, but it should include things such as current health, gold, important relics and cards central to the strategy, and any other relevant information. This could be useful for the player to get a sense of how the game is going and what they should be focusing on. This is a good place to use a better model, since it is a more strategic and high-level summary. We can also use this to inform the AI's decisions in future runs.~~ This is essentially implemented. It hasn't thoroughly been tested.
 
 ### User feedback and questions
 

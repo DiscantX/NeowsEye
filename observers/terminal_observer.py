@@ -8,7 +8,7 @@ to put them in. If terminal-mode debugging ever wants more than this,
 extend here rather than routing terminal output back through main.py.
 """
 
-from coaching_observer import AdviceEvent, CoachingObserver, ConnectionEvent, ErrorEvent, SummaryEvent
+from observers.coaching_observer import AdviceEvent, CoachingObserver, ConnectionEvent, ErrorEvent, SummaryEvent
 
 
 class TerminalObserver(CoachingObserver):

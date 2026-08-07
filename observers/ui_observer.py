@@ -16,11 +16,11 @@ import json
 import threading
 import time
 
-from coaching_observer import (
+from observers.coaching_observer import (
     AdviceEvent, CoachingObserver, ConnectionEvent, ErrorEvent, PromptEvent, UsageEvent,
 )
-from gemini_client import GeminiReply
-from tkinter_app import CoachOverlay
+from gemini.gemini_client import GeminiReply
+from gui.tkinter_app import CoachOverlay
 from typing import Optional
 
 

@@ -28,9 +28,9 @@ import threading
 import time
 
 import config
-from coaching_observer import AdviceEvent, ErrorEvent, PromptEvent, UsageEvent, SummaryEvent, next_seq
-from gemini_client import GeminiClient
-from usage_tracker import UsageTracker
+from observers.coaching_observer import AdviceEvent, ErrorEvent, PromptEvent, UsageEvent, SummaryEvent, next_seq
+from gemini.gemini_client import GeminiClient
+from gemini.usage_tracker import UsageTracker
 
 
 class _Task:

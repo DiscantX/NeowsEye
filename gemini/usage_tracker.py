@@ -80,6 +80,7 @@ class UsageTracker:
         tmp_path = self._state_path + ".tmp"
         with open(tmp_path, "w") as f:
             json.dump(data, f)
+        os.makedirs(self._state_path, exist_ok=True)
         os.replace(tmp_path, self._state_path)  # atomic on POSIX and Windows
 
     def _roll_period_if_needed(self):

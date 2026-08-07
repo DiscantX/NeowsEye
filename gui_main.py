@@ -24,11 +24,11 @@ code path. No new shutdown/timeout logic needed on main()'s side.
 
 import threading
 
-from coaching_observer import ObserverBroadcaster
+from observers.coaching_observer import ObserverBroadcaster
 from main import main as run_coaching_loop
-from terminal_observer import TerminalObserver
-from tkinter_app import CoachOverlay
-from ui_observer import UIObserver
+from observers.terminal_observer import TerminalObserver
+from gui.tkinter_app import CoachOverlay
+from observers.ui_observer import UIObserver
 
 
 def main():

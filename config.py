@@ -40,7 +40,7 @@ DEFAULT_MODEL = "gemini-3.1-flash-lite"
 QUOTA_RESET_TIMEZONE = "America/Los_Angeles"
 QUOTA_RESET_HOUR = 0  # in QUOTA_RESET_TIMEZONE
 
-USAGE_STATE_PATH = "usage_state.json"
+USAGE_STATE_PATH = "data/usage_state.json"
 ETA_ROLLING_WINDOW = 5
 
 RETRY_MAX_ATTEMPTS = 3

@@ -27,7 +27,7 @@ import socket
 import sys
 import threading
 
-from stream_peer import StreamPeer, HOST, PORT
+from net.stream_peer import StreamPeer, HOST, PORT
 
 
 class StreamAdapter(StreamPeer):

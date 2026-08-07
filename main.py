@@ -21,14 +21,14 @@ which observer is attached.
 
 import time
 
-from usage_tracker import UsageTracker
-from coaching_observer import ConnectionEvent, ErrorEvent, ObserverBroadcaster, StateSnapshot, SummaryEvent, CoachingObserver, next_seq
-from decision_trigger import DecisionTrigger
-from gemini_client import GeminiClient
-from gemini_worker import GeminiWorker
-from run_state import RunState
-from stream_client import StreamClient
-from terminal_observer import TerminalObserver
+from gemini.usage_tracker import UsageTracker
+from observers.coaching_observer import ConnectionEvent, ErrorEvent, ObserverBroadcaster, StateSnapshot, SummaryEvent, CoachingObserver, next_seq
+from core.decision_trigger import DecisionTrigger
+from gemini.gemini_client import GeminiClient
+from gemini.gemini_worker import GeminiWorker
+from core.run_state import RunState
+from net.stream_client import StreamClient
+from observers.terminal_observer import TerminalObserver
 
 class _RunStateUpdater(CoachingObserver):
     """Applies SummaryEvent updates back onto the owning RunState."""
