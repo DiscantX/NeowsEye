@@ -43,6 +43,11 @@ def _grid_flavor(screen_state: dict) -> str:
         return "transform"
     return "other"
 
+def _fingerprint(screen_state):
+    try:
+        return json.dumps(screen_state, sort_keys=True)
+    except TypeError:
+        return str(screen_state)
 
 class DecisionTrigger:
     def __init__(self):

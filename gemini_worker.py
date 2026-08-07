@@ -27,24 +27,27 @@ import queue
 import threading
 import time
 
-from coaching_observer import AdviceEvent, ErrorEvent, PromptEvent, next_seq
+import config
+from coaching_observer import AdviceEvent, ErrorEvent, PromptEvent, UsageEvent, next_seq
 from gemini_client import GeminiClient
+from usage_tracker import UsageTracker
 
 
 class _Task:
     __slots__ = ("kind", "payload", "seq", "enqueued_at")
 
     def __init__(self, kind, payload, seq):
-        self.kind = kind  # "start_combat" | "turn_update" | "one_off" | "end_combat"
+        self.kind = kind
         self.payload = payload
         self.seq = seq
         self.enqueued_at = time.monotonic()
 
 
 class GeminiWorker:
-    def __init__(self, gemini_client: GeminiClient, observer):
+    def __init__(self, gemini_client: GeminiClient, observer, usage_tracker: UsageTracker):
         self._gemini = gemini_client
         self._observer = observer
+        self._usage = usage_tracker
         self._queue = queue.Queue()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._started = False
@@ -64,7 +67,6 @@ class GeminiWorker:
         return self._submit("one_off", payload)
 
     def submit_end_combat(self) -> int:
-        """Queued, not direct -- see module docstring."""
         seq = next_seq()
         self._queue.put(_Task("end_combat", None, seq))
         return seq
@@ -73,16 +75,15 @@ class GeminiWorker:
         seq = next_seq()
         task = _Task(kind, payload, seq)
         self._observer.on_prompt_sent(
-            PromptEvent(seq=seq, timestamp=task.enqueued_at, kind=kind, payload=payload)
+            PromptEvent(
+                seq=seq, timestamp=task.enqueued_at, kind=kind, payload=payload,
+                eta_seconds=self._usage.eta_seconds(),
+            )
         )
         self._queue.put(task)
         return seq
 
     def _run(self):
-        """THREAD: the only thread ever allowed to call into
-        self._gemini. Processes tasks strictly in submission order --
-        this is what keeps a combat session's message history coherent,
-        not anything on the caller's side."""
         while True:
             task = self._queue.get()
 
@@ -96,12 +97,25 @@ class GeminiWorker:
                     ))
                 continue
 
+            if self._usage.is_daily_quota_exhausted():
+                self._observer.on_error(ErrorEvent(
+                    seq=next_seq(), timestamp=time.monotonic(),
+                    message=(
+                        f"Daily Gemini quota reached ({self._usage.rpd_limit} requests) -- "
+                        f"resets at {config.QUOTA_RESET_HOUR}:00 {config.QUOTA_RESET_TIMEZONE}."
+                    ),
+                    prompt_seq=task.seq,
+                ))
+                continue
+
+            wait = self._usage.wait_time()
+            if wait > 0:
+                time.sleep(wait)
+
             start = time.monotonic()
             try:
                 reply = self._dispatch(task)
             except Exception as e:
-                # Gemini/network errors shouldn't kill the worker thread --
-                # report and keep processing the next queued task.
                 self._observer.on_error(ErrorEvent(
                     seq=next_seq(), timestamp=time.monotonic(),
                     message=f"Gemini call failed ({task.kind}): {e}",
@@ -109,14 +123,21 @@ class GeminiWorker:
                 ))
                 continue
 
+            latency = time.monotonic() - start
+            self._usage.record_request(latency_s=latency, tokens=_total_tokens(reply.usage_metadata))
+
+            usage = self._usage.snapshot()
+            self._observer.on_usage_update(UsageEvent(
+                seq=next_seq(), timestamp=time.monotonic(),
+                requests_today=usage["requests_today"], daily_limit=usage["rpd_limit"],
+                requests_this_minute=usage["requests_this_minute"], rpm_limit=usage["rpm_limit"],
+                tokens_today=usage["tokens_today"],
+            ))
+
             self._observer.on_advice_received(AdviceEvent(
-                seq=next_seq(),
-                timestamp=time.monotonic(),
-                prompt_seq=task.seq,
-                kind=task.kind,
-                advice=reply.text,
-                usage_metadata=reply.usage_metadata,
-                latency_s=time.monotonic() - start,
+                seq=next_seq(), timestamp=time.monotonic(), prompt_seq=task.seq,
+                kind=task.kind, advice=reply.text, usage_metadata=reply.usage_metadata,
+                latency_s=latency,
             ))
 
     def _dispatch(self, task: _Task):
@@ -127,3 +148,11 @@ class GeminiWorker:
         if task.kind == "one_off":
             return self._gemini.one_off(task.payload)
         raise ValueError(f"Unknown task kind: {task.kind}")
+
+
+def _total_tokens(usage_metadata) -> int:
+    if usage_metadata is None:
+        return 0
+    prompt = getattr(usage_metadata, "prompt_token_count", 0) or 0
+    candidates = getattr(usage_metadata, "candidates_token_count", 0) or 0
+    return prompt + candidates

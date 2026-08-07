@@ -16,10 +16,13 @@ import json
 import threading
 import time
 
-from coaching_observer import AdviceEvent, CoachingObserver, ConnectionEvent, ErrorEvent, PromptEvent
+from coaching_observer import (
+    AdviceEvent, CoachingObserver, ConnectionEvent, ErrorEvent, PromptEvent, UsageEvent,
+)
 from gemini_client import GeminiReply
 from tkinter_app import CoachOverlay
 from typing import Optional
+
 
 
 class UIObserver(CoachingObserver):
@@ -75,9 +78,9 @@ class UIObserver(CoachingObserver):
             prompt_text = json.dumps(event.payload, indent=2) if event.payload else ""
             self._overlay.update_prompt(prompt_text)
 
-            # Start ETA countdown (estimate ~5-15 seconds for Gemini responses)
-            eta_seconds = 10  # Safe estimate for free tier
-            self._overlay.start_eta_countdown(eta_seconds)
+            self._overlay.update_prompt(prompt_text)
+            self._overlay.start_eta_countdown(round(event.eta_seconds))
+            self._overlay.feedback_status(f"Coaching prompt #{event.seq} sent to Gemini")
 
             # Update status
             self._overlay.feedback_status(f"Coaching prompt #{event.seq} sent to Gemini")
@@ -94,17 +97,6 @@ class UIObserver(CoachingObserver):
         with self._lock:
             # Update the main feedback display
             self._overlay.update_feedback(event.advice)
-
-            # Update tokens usage
-            if event.usage_metadata and hasattr(event.usage_metadata, 'prompt_token_count'):
-                tokens_used = event.usage_metadata.prompt_token_count + \
-                            (event.usage_metadata.candidates_token_count or 0)
-            else:
-                # Fallback for demo/mocked responses
-                tokens_used = 150  # Approximate 150 tokens per advice
-
-            limit = 200000  # Configurable from .env or settings
-            self._overlay.update_tokens(tokens_used, limit)
 
             # Clear ETA after response arrives -- routed through the
             # thread-safe helper rather than touching eta_label/eta_bar
@@ -124,8 +116,18 @@ class UIObserver(CoachingObserver):
             self._overlay.feedback_status(f"Error: {event.message}")
 
     def on_state_snapshot(self, event) -> None:
-        """Optional: Could update overlay with game state info."""
-        pass
+        with self._lock:
+            self._overlay.update_debug_info(event.screen_type, "combat" if event.in_combat else "non-combat")
+    
+    def on_usage_update(self, event: UsageEvent) -> None:
+        with self._lock:
+            self._overlay.update_usage(
+                requests_today=event.requests_today,
+                daily_limit=event.daily_limit,
+                requests_this_minute=event.requests_this_minute,
+                rpm_limit=event.rpm_limit,
+                tokens_today=event.tokens_today,
+            )
 
     def _get_prompt_for_seq(self, seq: int) -> Optional[str]:
         """Helper to retrieve stored prompt text."""

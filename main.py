@@ -21,6 +21,7 @@ which observer is attached.
 
 import time
 
+from usage_tracker import UsageTracker
 from coaching_observer import ConnectionEvent, ErrorEvent, ObserverBroadcaster, StateSnapshot, next_seq
 from decision_trigger import DecisionTrigger
 from gemini_client import GeminiClient
@@ -36,7 +37,7 @@ def build_default_observer() -> ObserverBroadcaster:
     return ObserverBroadcaster([TerminalObserver()])
 
 
-def main(observer: ObserverBroadcaster = None, on_client_ready=None):
+def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None):
     observer = observer or build_default_observer()
 
     client = StreamClient()
@@ -50,13 +51,14 @@ def main(observer: ObserverBroadcaster = None, on_client_ready=None):
     try:
         gemini = GeminiClient()
     except RuntimeError as e:
-        # No API key -- nothing useful this process can do without one,
-        # but that shouldn't crash with a traceback.
         observer.on_error(ErrorEvent(seq=next_seq(), timestamp=time.monotonic(), message=str(e)))
         client.close()
         return
 
-    worker = GeminiWorker(gemini, observer)
+    usage_tracker = UsageTracker(model_name=gemini.model_name)
+    if on_usage_tracker_ready:
+        on_usage_tracker_ready(usage_tracker)
+    worker = GeminiWorker(gemini, observer, usage_tracker)
     worker.start()
 
     run_state = RunState()

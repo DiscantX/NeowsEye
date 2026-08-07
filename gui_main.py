@@ -36,14 +36,24 @@ def main():
     # on_client_ready), and _on_close needs it to trigger shutdown --
     # this dict is just a mutable box the two closures below can share.
     client_holder = {}
+    tracker_holder = {}
 
     def handle_close():
         client = client_holder.get("client")
         if client:
             client.close()
+    
+    def handle_reset_rule_change(tz_name):
+        tracker = tracker_holder.get("tracker")
+        if tracker:
+            tracker.set_reset_rule(tz_name, 0)
+        # else: user clicked before the tracker was ready (e.g. still
+        # waiting on the CommunicationMod connection) -- the button's
+        # own label already updated, and set_reset_rule() will apply
+        # once the run actually starts, so silently no-op is fine here.
 
-    overlay = CoachOverlay(on_close=handle_close)
-
+    overlay = CoachOverlay(on_close=handle_close, on_reset_rule_change=handle_reset_rule_change)
+    
     # Terminal output is kept alongside the GUI -- useful for anyone
     # running this from a console for extra visibility/debugging,
     # and it's what already prints connection-lost/error messages.
@@ -52,8 +62,11 @@ def main():
     worker_thread = threading.Thread(
         target=run_coaching_loop,
         args=(observer,),
-        kwargs={"on_client_ready": lambda c: client_holder.update(client=c)},
-        daemon=True,  # if the Tk window closes, this shouldn't keep the process alive on its own
+        kwargs={
+            "on_client_ready": lambda c: client_holder.update(client=c),
+            "on_usage_tracker_ready": lambda t: tracker_holder.update(tracker=t),
+        },
+        daemon=True,
     )
     worker_thread.start()
 

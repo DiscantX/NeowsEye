@@ -33,11 +33,6 @@ class Card:
 
     @classmethod
     def from_dict(cls, data: dict) -> "Card":
-        # is_playable/has_target only appear on cards CommunicationMod
-        # reports as being IN HAND during combat -- cards from a plain
-        # deck listing (e.g. game_state["deck"], used outside combat or
-        # for the one-time combat intro) don't carry those fields at
-        # all, so they need defaults rather than being required.
         return cls(
             uuid=data.get("uuid", ""),
             id=data.get("id", ""),
@@ -53,11 +48,6 @@ class Card:
         )
 
     def dedupe_key(self) -> tuple:
-        """Two cards are 'the same card' for listing purposes iff every
-        one of these matches. NOTE: cost is deliberately included --
-        this is what makes Snecko Eye's randomized-cost copies of a card
-        correctly show up as separate entries instead of being
-        (wrongly) collapsed together."""
         return (
             self.name,
             self.upgrades,
@@ -69,6 +59,26 @@ class Card:
             self.exhausts,
             self.ethereal,
         )
+
+    def to_prompt_dict(self, quantity: int = 1) -> dict:
+        d = {
+            "name": self.name + ("+" if self.upgrades else ""),
+            "cost": self.cost,
+            "playable": self.is_playable,
+            "quantity": quantity,
+        }
+        if self.exhausts:
+            d["exhausts"] = True
+        if self.ethereal:
+            d["ethereal"] = True
+        return d
+
+    def to_deck_entry(self, quantity: int = 1) -> dict:
+        return {
+            "name": self.name + ("+" if self.upgrades else ""),
+            "cost": self.cost,
+            "quantity": quantity,
+        }
 
 def to_prompt_dict(self, quantity: int = 1) -> dict:
         d = {

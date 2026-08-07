@@ -42,8 +42,18 @@ class PromptEvent:
     seq: int
     timestamp: float          # time.monotonic() at enqueue
     kind: str                 # "start_combat" | "turn_update" | "one_off"
-    payload: dict              # exactly what was/will be sent to Gemini
+    payload: dict             # exactly what was/will be sent to Gemini
+    eta_seconds: float = 8.0  # UsageTracker's rolling estimate at submit time
 
+@dataclass
+class UsageEvent:
+    seq: int
+    timestamp: float
+    requests_today: int
+    daily_limit: int
+    requests_this_minute: int
+    rpm_limit: int
+    tokens_today: int
 
 @dataclass
 class AdviceEvent:
@@ -111,6 +121,9 @@ class CoachingObserver:
 
     def on_state_snapshot(self, event: StateSnapshot) -> None:
         pass
+    
+    def on_usage_update(self, event: UsageEvent) -> None:
+        pass
 
 
 class ObserverBroadcaster(CoachingObserver):
@@ -150,3 +163,6 @@ class ObserverBroadcaster(CoachingObserver):
 
     def on_state_snapshot(self, event: StateSnapshot) -> None:
         self._broadcast("on_state_snapshot", event)
+        
+    def on_usage_update(self, event: UsageEvent) -> None:
+        self._broadcast("on_usage_update", event)

@@ -25,9 +25,9 @@ from datetime import datetime
 class OverlayConfig:
     """Configuration settings for the overlay window."""
     width: int = 520
-    height: int = 460
+    height: int = 570
     min_width: int = 360
-    min_height: int = 320
+    min_height: int = 420
     offset_x: int = -540  # Right-aligned offset from right edge
     offset_y: int = 80    # From top edge
     bg_color: str = "#1a1a1a"
@@ -88,7 +88,7 @@ def _resolve_font_family(preferred: str) -> str:
 class CoachOverlay(tk.Tk):
     """Main overlay window that stays always-on-top."""
 
-    def __init__(self, config: Optional[OverlayConfig] = None, on_close=None):
+    def __init__(self, config: Optional[OverlayConfig] = None, on_close=None, on_reset_rule_change=None):
         super().__init__()
 
         self.config_data = config or OverlayConfig()
@@ -110,6 +110,8 @@ class CoachOverlay(tk.Tk):
         self._eta_thread: Optional[threading.Thread] = None
         self._running = True
         self._feedback_entry_count = 0
+        
+        self._on_reset_rule_change = on_reset_rule_change
 
         # Position window on screen
         self._position_window()
@@ -271,6 +273,17 @@ class CoachOverlay(tk.Tk):
         for widget in (self.title_bar, self.title_label, self.status_dot):
             widget.bind('<ButtonPress-1>', self._start_move)
             widget.bind('<B1-Motion>', self._do_move)
+        
+        self.title_bar.pack(fill=tk.X, side=tk.TOP)
+
+        # ── Debug line (screen_type / event kind) ──
+        debug_frame = tk.Frame(self.main_frame, bg=self.config_data.bg_color)
+        debug_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
+        self.debug_label = tk.Label(
+            debug_frame, text="screen: -  |  event: -", font=self.mini_font,
+            fg=self.config_data.dim_color, bg=self.config_data.bg_color, anchor='w',
+        )
+        self.debug_label.pack(fill=tk.X)
 
         # ── Coaching Feedback Section (PRIMARY ELEMENT) ──
         feedback_container = tk.Frame(self.main_frame, bg=self.config_data.bg_color)
@@ -370,6 +383,40 @@ class CoachOverlay(tk.Tk):
         self.token_bar.pack(anchor=tk.E, pady=(2, 0))
         self.token_bar_bg = self.token_bar.create_rectangle(0, 0, 140, 8, fill="#2a2a2a", outline="")
 
+        # ── Rate limits ──
+        rate_row = tk.Frame(self.main_frame, bg=self.config_data.bg_color)
+        rate_row.pack(fill=tk.X, padx=10, pady=(2, 4))
+        self.rate_daily_label = tk.Label(
+            rate_row, text="Today: -- / --", font=self.small_font,
+            fg=self.config_data.dim_color, bg=self.config_data.bg_color,
+        )
+        self.rate_daily_label.pack(side=tk.LEFT)
+        self.rate_minute_label = tk.Label(
+            rate_row, text="-- / -- RPM", font=self.small_font,
+            fg=self.config_data.dim_color, bg=self.config_data.bg_color,
+        )
+        self.rate_minute_label.pack(side=tk.RIGHT)
+
+    # ── Reset timer ──
+        self.reset_rule_button = tk.Menubutton(
+            rate_row, text="Reset: Pacific", font=self.mini_font,
+            fg=self.config_data.dim_color, bg=self.config_data.bg_color,
+            activebackground=self.config_data.border_color, activeforeground=self.config_data.fg_color,
+            relief=tk.FLAT, bd=0, cursor="hand2",
+        )
+        reset_menu = tk.Menu(self.reset_rule_button, tearoff=0,
+                              bg=self.config_data.bg_color, fg=self.config_data.fg_color)
+        reset_menu.add_command(
+            label="Pacific (Google default)",
+            command=lambda: self._on_reset_rule_selected("America/Los_Angeles", "Pacific"),
+        )
+        reset_menu.add_command(
+            label="Local time",
+            command=lambda: self._on_reset_rule_selected("local", "Local"),
+        )
+        self.reset_rule_button.config(menu=reset_menu)
+        self.reset_rule_button.pack(side=tk.RIGHT, padx=(0, 8))
+
         # Status bar
         self.status_frame = tk.Frame(self.main_frame, bg=self.config_data.border_color)
         self.status_frame.pack(side=tk.BOTTOM, fill=tk.X)
@@ -404,8 +451,9 @@ class CoachOverlay(tk.Tk):
         tk.Frame(self.main_frame, bg=self.config_data.border_color, height=1).pack(fill=tk.X, padx=10)
 
     def _create_layout(self):
-        """Arrange widgets in the layout."""
-        self.title_bar.pack(fill=tk.X, side=tk.TOP)
+        """Title bar is already packed first in _create_widgets, so it
+        claims the top slot before any other TOP-side child of
+        main_frame does."""
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
     def _add_borders(self):
@@ -621,6 +669,21 @@ class CoachOverlay(tk.Tk):
 
         self.after(0, _update_token_display)
 
+    def update_debug_info(self, screen_type, event_kind):
+        def _update():
+            self.debug_label.config(text=f"screen: {screen_type or '-'}  |  event: {event_kind or '-'}")
+        self.after(0, _update)
+
+    def update_usage(self, requests_today, daily_limit, requests_this_minute, rpm_limit, tokens_today):
+        def _update():
+            pct = (requests_today / daily_limit * 100) if daily_limit else 0
+            color = (self.config_data.success_color if pct < 75
+                     else self.config_data.eta_color if pct < 90
+                     else self.config_data.error_color)
+            self.rate_daily_label.config(text=f"Today: {requests_today} / {daily_limit}", fg=color)
+            self.rate_minute_label.config(text=f"{requests_this_minute} / {rpm_limit} RPM")
+        self.after(0, _update)
+
     def feedback_status(self, message: str):
         """Update the status label with a message."""
         self.status_label.config(text=message)
@@ -656,6 +719,11 @@ class CoachOverlay(tk.Tk):
     def is_loading(self) -> bool:
         """Check if feedback is currently being loaded."""
         return self._feedback_data.is_loading
+    
+    def _on_reset_rule_selected(self, timezone_name, display_name):
+        self.reset_rule_button.config(text=f"Reset: {display_name}")
+        if self._on_reset_rule_change:
+            self._on_reset_rule_change(timezone_name)
 
 
 # ─── Main Entry Point ──────────────────────────────────────────────────────────

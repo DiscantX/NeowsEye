@@ -18,10 +18,12 @@ python-dotenv) or already present in the environment.
 
 import json
 import os
+import time
+import config
 
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
+from google.genai import types, errors
 
 from dataclasses import dataclass
 
@@ -39,7 +41,9 @@ load_dotenv()
 # since we're low-volume (about one request per turn) and want reasoning quality 
 # over throughput; however, it has a low daily limit compared to "gemini-3-flash-preview"
 
-MODEL_NAME = "gemini-3.1-flash-lite" 
+# This is set in the config file
+
+MODEL_NAME = config.DEFAULT_MODEL
 
 # The actual prompt needs to be workshopped throgh playtesting. There are noticeable
 # errors Gemini makes that may be avoidable through prompting. (ie. I had to tell it to
@@ -60,10 +64,13 @@ For combat turns: recommend a concrete play order for the hand, call \
 out lethal or dangerous incoming damage explicitly, and flag if the \
 player should play agressively or defensively for the turn.
 
-During combat, always calculate the energy cost of using the cards you \
+During combat, always accurately calculate the energy cost of using the cards you \
 recommend. Ensure the player will have enough energy to play all cards in \
-your recommendation. DO not assume the player always starts with 3 energy. \
-Always refer to the actual value given in the prompt.
+your recommendation. If the total energy value of your recommendation exceeds the
+amount of energy that the player has, do not include it in your response, unless the player can \
+gain the extra energy through some other means, such as a potion, and it is wise to use it. \
+If the player cannot afford your suggestion, provide an alternative that they can afford. \
+Do not assume the player always starts with 3 energy. Always refer to the actual value given in the prompt. \
 
 Also always consider the order in which cards are played \
 and how their effects will impact the rest of the turn or future turns; for example, when \
@@ -126,8 +133,31 @@ class GeminiClient:
 
     @staticmethod
     def _ask(payload: dict, chat) -> "GeminiReply":
-        response = chat.send_message(json.dumps(payload))
-        return GeminiReply(
-            text=response.text.strip(),
-            usage_metadata=getattr(response, "usage_metadata", None),
-        )
+        """The SDK already retries transient errors internally (~4x,
+        1-60s backoff) before ever raising to us -- see
+        https://ai.google.dev/gemini-api/docs/troubleshooting. A 429/5xx
+        we still see here has already survived that, so our own retry
+        budget stays deliberately small (config.RETRY_MAX_ATTEMPTS)
+        rather than stacking a second long backoff on top of the SDK's.
+        Non-retryable 4xx (bad request, auth, etc.) raise immediately --
+        retrying those would just waste attempts on a guaranteed failure.
+        """
+        last_error = None
+        for attempt in range(1, config.RETRY_MAX_ATTEMPTS + 1):
+            try:
+                response = chat.send_message(json.dumps(payload))
+                return GeminiReply(
+                    text=response.text.strip(),
+                    usage_metadata=getattr(response, "usage_metadata", None),
+                )
+            except errors.APIError as e:
+                last_error = e
+                retryable = e.code == 429 or (e.code is not None and 500 <= e.code < 600)
+                if not retryable or attempt == config.RETRY_MAX_ATTEMPTS:
+                    raise
+                delay = min(
+                    config.RETRY_BASE_DELAY_S * (2 ** (attempt - 1)),
+                    config.RETRY_MAX_DELAY_S,
+                )
+                time.sleep(delay)
+        raise last_error
