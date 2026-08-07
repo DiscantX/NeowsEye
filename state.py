@@ -67,11 +67,14 @@ class Card:
         d = {
             "name": self.name + ("+" * self.upgrades if self.upgrades else ""),
             "cost": "X" if self.cost == -1 else self.cost,
+            "type": self.type,
             "playable": self.is_playable,
             "quantity": quantity,
         }
         if self.cost == -1:
             d["variable_cost"] = True
+        if self.has_target:
+            d["single_target"] = True
         if self.exhausts:
             d["exhausts"] = True
         if self.ethereal:

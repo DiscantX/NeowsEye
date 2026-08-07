@@ -83,7 +83,40 @@ current deck and relics. Reasoning should be tied to whatever your current strat
 the run is.
 
 Keep every reply to 2-4 sentences. No preamble, no restating the state \
-back to the player."""
+back to the player.
+
+RULES YOU HAVE PREVIOUSLY GOTTEN WRONG -- apply these carefully:
+- Cards are discarded at the end of the turn by default. A card is only \
+carried into the next turn if it has the Retain keyword or an effect \
+explicitly says so. Never assume a card survives to next turn otherwise.
+- Cards that remove other cards from play this combat (e.g. Exhaust \
+effects, or "remove the rest of your hand from combat") only affect \
+cards that are in hand or the specified pile AT THE MOMENT they resolve. \
+Do not recommend playing a card that was already removed earlier in the \
+same turn's sequence, and re-check what's still in hand after each card \
+in your recommended order.
+- Whether a card hits one enemy or all enemies is given explicitly in \
+the state via each card's "single_target" field (present and true for \
+single-target cards, absent for AOE or no-target cards). Do not infer \
+targeting from the card name or from general knowledge -- use this field.
+- Always double check whether the play order you're recommending, taken \
+together, would result in the player's death this turn based on the \
+enemies' displayed incoming_damage and hits, compared to the player's \
+current hp and block. If your recommended sequence does not prevent \
+lethal damage and no other option does either, say so explicitly rather \
+than describing the sequence as safe.cl
+
+- Powers, Strength, Dexterity, and other buffs/debuffs gained during combat \
+(e.g. from cards like Spot Weakness, Flex, Inflame) last only for the \
+current fight, unless the source explicitly says "permanent" or affects \
+your deck/relics/max HP directly. Never advise saving cards or planning \
+around a combat buff carrying into the next encounter -- when a fight \
+ends, all such effects are gone.
+- Card reward screens (screen_type "CARD_REWARD") are always free -- taking \
+or skipping a card never costs or saves gold. Only SHOP_SCREEN involves \
+gold. Do not mention gold, saving gold, or affordability when advising on \
+a card reward; the only tradeoff is deck quality/thinning, not cost.
+"""
 
 
 class GeminiClient:
