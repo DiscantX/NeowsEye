@@ -88,6 +88,12 @@ class ConnectionEvent:
     connected: bool
     detail: str = ""
 
+@dataclass
+class SummaryEvent:
+    seq: int
+    timestamp: float
+    combat_summary: str   # 3-4 sentence recap of the fight that just ended
+    state_summary: str    # rewritten "state of the game", replaces the prior one
 
 @dataclass
 class StateSnapshot:
@@ -126,6 +132,9 @@ class CoachingObserver:
         pass
     
     def on_usage_update(self, event: UsageEvent) -> None:
+        pass
+
+    def on_summary_updated(self, event: SummaryEvent) -> None:
         pass
 
 
@@ -169,3 +178,6 @@ class ObserverBroadcaster(CoachingObserver):
         
     def on_usage_update(self, event: UsageEvent) -> None:
         self._broadcast("on_usage_update", event)
+        
+    def on_summary_updated(self, event: SummaryEvent) -> None:
+        self._broadcast("on_summary_updated", event)

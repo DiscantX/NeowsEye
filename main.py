@@ -22,13 +22,22 @@ which observer is attached.
 import time
 
 from usage_tracker import UsageTracker
-from coaching_observer import ConnectionEvent, ErrorEvent, ObserverBroadcaster, StateSnapshot, next_seq
+from coaching_observer import ConnectionEvent, ErrorEvent, ObserverBroadcaster, StateSnapshot, SummaryEvent, CoachingObserver, next_seq
 from decision_trigger import DecisionTrigger
 from gemini_client import GeminiClient
 from gemini_worker import GeminiWorker
 from run_state import RunState
 from stream_client import StreamClient
 from terminal_observer import TerminalObserver
+
+class _RunStateUpdater(CoachingObserver):
+    """Applies SummaryEvent updates back onto the owning RunState."""
+
+    def __init__(self, run_state: RunState):
+        self._run_state = run_state
+
+    def on_summary_updated(self, event: SummaryEvent) -> None:
+        self._run_state.apply_summary(event.combat_summary, event.state_summary)
 
 def build_default_observer() -> ObserverBroadcaster:
     """The terminal path. A future UI entry point adds a UI observer
@@ -62,7 +71,9 @@ def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None):
     worker.start()
 
     run_state = RunState()
+    
     trigger = DecisionTrigger()
+    observer.add(_RunStateUpdater(run_state))
 
     # Tracks whether we were IN COMBAT as of the end of the PREVIOUS poll.
     # This is how we tell "first turn of a new fight" (-> start_combat)
@@ -87,7 +98,7 @@ def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None):
 
             if not message.get("in_game"):
                 if in_combat:
-                    worker.submit_end_combat()
+                    worker.submit_end_combat(run_state.strategic_summary)
                     in_combat = False
                 continue
 
@@ -107,7 +118,7 @@ def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None):
             in_combat = run_state.combat is not None
 
             if was_in_combat and not in_combat:
-                worker.submit_end_combat()
+                worker.submit_end_combat(run_state.strategic_summary)
 
             observer.on_state_snapshot(StateSnapshot(
                 seq=next_seq(),

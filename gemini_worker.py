@@ -28,7 +28,7 @@ import threading
 import time
 
 import config
-from coaching_observer import AdviceEvent, ErrorEvent, PromptEvent, UsageEvent, next_seq
+from coaching_observer import AdviceEvent, ErrorEvent, PromptEvent, UsageEvent, SummaryEvent, next_seq
 from gemini_client import GeminiClient
 from usage_tracker import UsageTracker
 
@@ -66,10 +66,8 @@ class GeminiWorker:
     def submit_one_off(self, payload: dict) -> int:
         return self._submit("one_off", payload)
 
-    def submit_end_combat(self) -> int:
-        seq = next_seq()
-        self._queue.put(_Task("end_combat", None, seq))
-        return seq
+    def submit_end_combat(self, prior_state_summary: str = "") -> int:
+        return self._submit("end_combat", {"prior_state_summary": prior_state_summary})
 
     def _submit(self, kind, payload) -> int:
         seq = next_seq()
@@ -87,25 +85,23 @@ class GeminiWorker:
         while True:
             task = self._queue.get()
 
-            if task.kind == "end_combat":
-                try:
-                    self._gemini.end_combat()
-                except Exception as e:
+            if self._usage.is_daily_quota_exhausted():
+                if task.kind == "end_combat":
+                    # Can't afford the extra request -- still have to close
+                    # the session so it doesn't leak into the next fight's
+                    # start_combat(). No error surfaced here specifically:
+                    # whatever advice call already hit this quota wall this
+                    # fight will have shown the error once already.
+                    self._gemini.discard_combat_session()
+                else:
                     self._observer.on_error(ErrorEvent(
                         seq=next_seq(), timestamp=time.monotonic(),
-                        message=f"end_combat failed: {e}", prompt_seq=task.seq,
+                        message=(
+                            f"Daily Gemini quota reached ({self._usage.rpd_limit} requests) -- "
+                            f"resets at {config.QUOTA_RESET_HOUR}:00 {config.QUOTA_RESET_TIMEZONE}."
+                        ),
+                        prompt_seq=task.seq,
                     ))
-                continue
-
-            if self._usage.is_daily_quota_exhausted():
-                self._observer.on_error(ErrorEvent(
-                    seq=next_seq(), timestamp=time.monotonic(),
-                    message=(
-                        f"Daily Gemini quota reached ({self._usage.rpd_limit} requests) -- "
-                        f"resets at {config.QUOTA_RESET_HOUR}:00 {config.QUOTA_RESET_TIMEZONE}."
-                    ),
-                    prompt_seq=task.seq,
-                ))
                 continue
 
             wait = self._usage.wait_time()
@@ -116,6 +112,8 @@ class GeminiWorker:
             try:
                 reply = self._dispatch(task)
             except Exception as e:
+                if task.kind == "end_combat":
+                    self._gemini.discard_combat_session()
                 self._observer.on_error(ErrorEvent(
                     seq=next_seq(), timestamp=time.monotonic(),
                     message=f"Gemini call failed ({task.kind}): {e}",
@@ -123,9 +121,19 @@ class GeminiWorker:
                 ))
                 continue
 
+            if task.kind == "end_combat" and reply is None:
+                # No session was open -- nothing to summarize, no request
+                # made. Still emit a SummaryEvent so an ETA countdown the
+                # observer started on submit doesn't hang indefinitely.
+                self._observer.on_summary_updated(SummaryEvent(
+                    seq=next_seq(), timestamp=time.monotonic(),
+                    combat_summary="", state_summary=task.payload.get("prior_state_summary", ""),
+                ))
+                continue
+
             latency = time.monotonic() - start
             self._usage.record_request(latency_s=latency, tokens=_total_tokens(reply.usage_metadata))
-            
+
             usage = self._usage.snapshot()
             self._observer.on_usage_update(UsageEvent(
                 seq=next_seq(), timestamp=time.monotonic(),
@@ -135,11 +143,17 @@ class GeminiWorker:
                 tokens_this_minute=usage["tokens_this_minute"], tpm_limit=usage["tpm_limit"],
             ))
 
-            self._observer.on_advice_received(AdviceEvent(
-                seq=next_seq(), timestamp=time.monotonic(), prompt_seq=task.seq,
-                kind=task.kind, advice=reply.text, usage_metadata=reply.usage_metadata,
-                latency_s=latency, reasoning=reply.reasoning,
-            ))
+            if task.kind == "end_combat":
+                self._observer.on_summary_updated(SummaryEvent(
+                    seq=next_seq(), timestamp=time.monotonic(),
+                    combat_summary=reply.combat_summary, state_summary=reply.state_summary,
+                ))
+            else:
+                self._observer.on_advice_received(AdviceEvent(
+                    seq=next_seq(), timestamp=time.monotonic(), prompt_seq=task.seq,
+                    kind=task.kind, advice=reply.text, usage_metadata=reply.usage_metadata,
+                    latency_s=latency, reasoning=reply.reasoning,
+                ))
 
     def _dispatch(self, task: _Task):
         if task.kind == "start_combat":
@@ -148,6 +162,8 @@ class GeminiWorker:
             return self._gemini.turn_update(task.payload)
         if task.kind == "one_off":
             return self._gemini.one_off(task.payload)
+        if task.kind == "end_combat":
+            return self._gemini.end_combat(task.payload.get("prior_state_summary", ""))
         raise ValueError(f"Unknown task kind: {task.kind}")
 
 

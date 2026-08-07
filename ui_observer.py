@@ -131,6 +131,13 @@ class UIObserver(CoachingObserver):
             self._overlay.update_tokens(event.tokens_this_minute, event.tpm_limit)
             self._overlay.update_daily_tokens(event.tokens_today)
 
+    def on_summary_updated(self, event: SummaryEvent) -> None:
+        with self._lock:
+            if event.state_summary:
+                self._overlay.update_state_summary(event.state_summary)
+            self._overlay.set_eta_ready()
+            self._overlay.feedback_status("State of the game updated")
+
     def _get_prompt_for_seq(self, seq: int) -> Optional[str]:
         """Helper to retrieve stored prompt text."""
         with self._lock:

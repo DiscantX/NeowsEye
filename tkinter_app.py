@@ -25,9 +25,9 @@ from datetime import datetime
 class OverlayConfig:
     """Configuration settings for the overlay window."""
     width: int = 520
-    height: int = 570
+    height: int = 680
     min_width: int = 360
-    min_height: int = 420
+    min_height: int = 510
     offset_x: int = -540  # Right-aligned offset from right edge
     offset_y: int = 80    # From top edge
     bg_color: str = "#1a1a1a"
@@ -40,6 +40,7 @@ class OverlayConfig:
     success_color: str = "#00cc77"
     error_color: str = "#ff4466"
     dim_color: str = "#888888"
+    summary_color: str = "#ffd966"
     # Real (blended) translucency only -- see _setup_window for why this
     # window deliberately does NOT also use a color-key transparency
     # trick. A lower value is more see-through but less legible over
@@ -284,6 +285,23 @@ class CoachOverlay(tk.Tk):
             fg=self.config_data.dim_color, bg=self.config_data.bg_color, anchor='w',
         )
         self.debug_label.pack(fill=tk.X)
+
+        # ── State of the Game Section ──
+        summary_container = tk.Frame(self.main_frame, bg=self.config_data.bg_color)
+        summary_container.pack(fill=tk.X, padx=10, pady=4)
+
+        tk.Label(
+            summary_container, text="STATE OF THE GAME", font=self.label_font,
+            fg=self.config_data.summary_color, bg=self.config_data.bg_color,
+        ).pack(anchor=tk.W, pady=(0, 3))
+
+        summary_box, self.summary_text = self._make_scrollable_text(
+            summary_container, height=4,
+            fg_color=self.config_data.summary_color, font=self.small_font,
+        )
+        summary_box.pack(fill=tk.X)
+
+        self._add_divider()
 
         # ── Coaching Feedback Section (PRIMARY ELEMENT) ──
         feedback_container = tk.Frame(self.main_frame, bg=self.config_data.bg_color)
@@ -592,6 +610,15 @@ class CoachOverlay(tk.Tk):
             self.prompt_text.insert(tk.END, prompt)
             self.prompt_text.config(state=tk.DISABLED)
             self.prompt_text.see('1.0')
+        self.after(0, _update)
+
+    def update_state_summary(self, summary: str):
+        def _update():
+            self.summary_text.config(state=tk.NORMAL)
+            self.summary_text.delete('1.0', tk.END)
+            self.summary_text.insert(tk.END, summary)
+            self.summary_text.config(state=tk.DISABLED)
+            self.summary_text.see('1.0')
         self.after(0, _update)
 
     def start_eta_countdown(self, seconds: int):

@@ -234,6 +234,8 @@ class RunState:
         self.relics = []
         self.potions = []
         self.combat: Optional[CombatState] = None
+        self.strategic_summary: str = ""
+        self.summary_log: list = []  # [{"floor", "act", "kind": "combat"|"state", "text"}, ...]
 
         self.dirty = set()
         self._initialized = False
@@ -288,6 +290,23 @@ class RunState:
                 self.combat.apply(combat_dict)
         else:
             self.combat = None  # fight ended (or never started)
+
+    def apply_summary(self, combat_summary: str, state_summary: str):
+        """Called when a combat-end summarization result comes back.
+        state_summary REPLACES the persisted summary (Gemini is asked to
+        rewrite fresh each time, not append) -- see gemini_client.py's
+        end_combat(). summary_log keeps a permanent record of both parts
+        regardless, for future use (e.g. run post-mortems, see todo.md)."""
+        if state_summary:
+            self.strategic_summary = state_summary
+        if combat_summary:
+            self.summary_log.append({
+                "floor": self.floor, "act": self.act, "kind": "combat", "text": combat_summary,
+            })
+        if state_summary:
+            self.summary_log.append({
+                "floor": self.floor, "act": self.act, "kind": "state", "text": state_summary,
+            })
 
     def mark_synced(self):
         """Call after a run-level payload has actually been sent to
@@ -345,6 +364,8 @@ class RunState:
         assert self.combat is not None
         payload = {"event": "combat_start"}
         payload.update(self._run_level_payload(self.dirty))
+        if self.strategic_summary:
+            payload["state_of_the_game"] = self.strategic_summary
         payload.update(self.combat.full_payload())
         return payload
 
@@ -367,6 +388,8 @@ class RunState:
                 "event": "decision_screen",
             }
             payload.update(self._run_level_payload(self.dirty))
+            if self.strategic_summary:
+                payload["state_of_the_game"] = self.strategic_summary
             if self.screen_type in SCREENS_REQUIRING_GOLD and "gold" not in payload:
                 payload["gold"] = self.gold
             payload["screen_type"] = self.screen_type

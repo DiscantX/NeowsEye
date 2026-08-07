@@ -8,7 +8,7 @@ to put them in. If terminal-mode debugging ever wants more than this,
 extend here rather than routing terminal output back through main.py.
 """
 
-from coaching_observer import AdviceEvent, CoachingObserver, ConnectionEvent, ErrorEvent
+from coaching_observer import AdviceEvent, CoachingObserver, ConnectionEvent, ErrorEvent, SummaryEvent
 
 
 class TerminalObserver(CoachingObserver):
@@ -23,3 +23,9 @@ class TerminalObserver(CoachingObserver):
 
     def on_error(self, event: ErrorEvent) -> None:
         print(f"[Neow's Eye] {event.message}")
+        
+    def on_summary_updated(self, event: SummaryEvent) -> None:
+        if event.combat_summary:
+            print(f"\n[Neow's Eye] (combat summary)\n{event.combat_summary}")
+        if event.state_summary:
+            print(f"\n[Neow's Eye] === State of the Game ===\n{event.state_summary}\n")

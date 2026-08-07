@@ -87,6 +87,11 @@ give a short recommendation and one sentence of reasoning tied to the \
 current deck and relics. Reasoning should be tied to whatever your current strategy for
 the run is.
 
+If the state includes a field called "state_of_the_game", this is your own \
+prior summary of the run's strategy so far, carried forward from earlier \
+combats. Treat it as trusted context about your own past reasoning, not \
+something to re-derive from scratch.
+
 Keep every reply to 2-4 sentences. No preamble, no restating the state \
 back to the player.
 
@@ -115,17 +120,42 @@ than describing the sequence as safe.cl
 threat just because intent is unresolved. Recommend cautious or
 defensive play when facing unknown intent, and note that the real
 intent will be visible starting turn 2.
+- Powers, Strength, Dexterity, and other buffs/debuffs gained during combat \
+(e.g. from cards like Spot Weakness, Flex, Inflame) last only for the \
+current fight, unless the source explicitly says "permanent" or affects \
+your deck/relics/max HP directly. Never advise saving cards or planning \
+around a combat buff carrying into the next encounter -- when a fight \
+ends, all such effects are gone.
+-AOE cards must not be phrased as targeting a single enemy — say\
+"hits all enemies" / omit target naming entirely when single_target is absent.
 """
-# - Powers, Strength, Dexterity, and other buffs/debuffs gained during combat \
-# (e.g. from cards like Spot Weakness, Flex, Inflame) last only for the \
-# current fight, unless the source explicitly says "permanent" or affects \
-# your deck/relics/max HP directly. Never advise saving cards or planning \
-# around a combat buff carrying into the next encounter -- when a fight \
-# ends, all such effects are gone.
+
 # - Card reward screens (screen_type "CARD_REWARD") are always free -- taking \
-# or skipping a card never costs or saves gold. Only SHOP_SCREEN involves \
+# or skipping a card never costs or saves gold. Only SHOP_SCREEN and certain involves \
 # gold. Do not mention gold, saving gold, or affordability when advising on \
 # a card reward; the only tradeoff is deck quality/thinning, not cost.
+
+@dataclass
+class SummaryResult:
+    combat_summary: str
+    state_summary: str
+    usage_metadata: object = None
+    
+COMBAT_SUMMARY_HEADER = "=== COMBAT SUMMARY ==="
+STATE_SUMMARY_HEADER = "=== STATE OF THE GAME ==="
+
+
+def _split_summary_response(text: str) -> tuple[str, str]:
+    """Splits a combat-end summarization reply into (combat_summary,
+    state_summary). Falls back to putting everything in state_summary if
+    the expected headers aren't both present -- a malformed split
+    shouldn't crash the pipeline or silently drop the run's persisted
+    memory, just degrade to 'treat the whole reply as the new summary'."""
+    if COMBAT_SUMMARY_HEADER in text and STATE_SUMMARY_HEADER in text:
+        _, rest = text.split(COMBAT_SUMMARY_HEADER, 1)
+        combat_part, state_part = rest.split(STATE_SUMMARY_HEADER, 1)
+        return combat_part.strip(), state_part.strip()
+    return "", text.strip()
 
 class GeminiClient:
     def __init__(self, api_key=None, model_name=MODEL_NAME):
@@ -164,8 +194,56 @@ class GeminiClient:
             return self.start_combat(turn_delta)
         return self._ask(turn_delta, self._chat)
 
-    def end_combat(self):
-        """Call when combat ends so the next fight starts a clean session."""
+    def end_combat(self, prior_state_summary: str = "") -> Optional[SummaryResult]:
+        """Call when combat ends. If a session is open, sends one final
+        message on that session asking Gemini to (a) recap the fight that
+        just happened and (b) rewrite -- not append to -- the persisted
+        run-level strategic summary, then closes the session. Returns
+        None (no request made) if there's no open session, e.g. main.py
+        restarted mid-fight."""
+        if self._chat is None:
+            return None
+
+        payload = {
+            "event": "combat_end_summarize",
+            "prior_state_summary": prior_state_summary or "(none yet -- first combat of the run)",
+            "instruction": (
+                f"This combat is now over. Respond in exactly two parts, using "
+                f"these exact headers:\n\n"
+                f"{COMBAT_SUMMARY_HEADER}\n"
+                f"3-4 sentences on this specific fight: what happened, any close "
+                f"calls or notable card performance.\n\n"
+                f"{STATE_SUMMARY_HEADER}\n"
+                f"An updated overall strategic summary for the run so far, "
+                f"written fresh -- not appended to the prior one, but rewritten "
+                f"to reflect the full picture including what just happened. "
+                f"6-8 sentences. Cover: what archetype or plan you're building "
+                f"toward, what's working, what isn't, and what to prioritize "
+                f"next. This should be useful both as your own working context "
+                f"and as a readable progress summary for the player. Do NOT "
+                f"restate the deck list, relic list, or exact HP/gold numbers "
+                f"-- those are provided separately on every request. Keep this "
+                f"to 6-8 sentences regardless of how eventful the run has been "
+                f"-- compress, don't accumulate."
+            ),
+        }
+        reply = self._ask(payload, self._chat)
+        self._chat = None
+
+        combat_summary, state_summary = _split_summary_response(reply.text)
+        if not state_summary:
+            state_summary = prior_state_summary  # parsing failed -- don't wipe it
+        return SummaryResult(
+            combat_summary=combat_summary,
+            state_summary=state_summary,
+            usage_metadata=reply.usage_metadata,
+        )
+
+    def discard_combat_session(self):
+        """Closes the current session without attempting a summarization
+        call -- used when we can't afford the extra request (daily quota
+        exhausted) or the call itself failed, so a stale session never
+        leaks into the next fight's start_combat()."""
         self._chat = None
 
     def one_off(self, context: dict) -> str:
