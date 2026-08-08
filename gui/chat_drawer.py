@@ -13,16 +13,17 @@ class ChatDrawerMixin:
     def _create_drawer_widgets(self):
         """Builds the chat/question drawer panel with a multi-line input box and grey border separator."""
         cfg = self.config_data
-        self.drawer_outer_frame = tk.Frame(self, bg=cfg.bg_color, cursor="fleur")
+        self.drawer_outer_frame = tk.Frame(self, bg=cfg.bg_color, width=cfg.drawer_width, cursor="fleur")
+        self.drawer_outer_frame.pack_propagate(False)
         
+        separator_border = tk.Frame(self.drawer_outer_frame, bg=cfg.border_color, width=2)
+        separator_border.pack(side=tk.LEFT, fill=tk.Y)
+
         self.drawer_frame = tk.Frame(
             self.drawer_outer_frame, bg=cfg.bg_color, width=cfg.drawer_width,
         )
         self.drawer_frame.pack_propagate(False)
-        self.drawer_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        separator_border = tk.Frame(self.drawer_outer_frame, bg=cfg.border_color, width=2)
-        separator_border.pack(side=tk.RIGHT, fill=tk.Y)
+        self.drawer_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         drawer_header = tk.Frame(self.drawer_frame, bg=cfg.border_color, height=22, cursor="fleur")
         drawer_header.pack_propagate(False)

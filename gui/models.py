@@ -15,11 +15,15 @@ class OverlayConfig:
     """Configuration settings for the overlay window."""
     width: int = 520
     height: int = 680
-    min_width: int = 480
+    min_width: int = 320
+    max_width: int = 1200
     min_height: int = 665
+    max_height: int = 1200
     offset_x: int = -540  # Right-aligned offset from right edge
     offset_y: int = 80    # From top edge
     drawer_width: int = 260  # width of the chat/question drawer panel
+    drawer_min_width: int = 260
+    drawer_max_width: int = 260
     bg_color: str = "#1a1a1a"
     fg_color: str = "#e0e0e0"
     accent_color: str = "#00ffcc"

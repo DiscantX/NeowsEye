@@ -67,6 +67,10 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
 
         initial_width = cfg.width + (cfg.drawer_width if self._drawer_open else 0)
         self.geometry(f"{initial_width}x{cfg.height}")
+        
+        min_w = cfg.min_width + (cfg.drawer_width if self._drawer_open else 0)
+        self.minsize(min_w, cfg.min_height)
+        
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _setup_fonts(self):
@@ -102,7 +106,7 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         )
 
     def _make_scrollable_text(self, parent, height, fg_color, font, wrap=tk.WORD):
-        """Creates a scrollable text area component container."""
+        """Creates a text area component container without scrollbars."""
         cfg = self.config_data
         container = tk.Frame(parent, bg=cfg.bg_color)
         text_widget = tk.Text(
@@ -121,13 +125,7 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
             undo=False,
             highlightthickness=0,
         )
-        scrollbar = ttk.Scrollbar(
-            container, orient=tk.VERTICAL, command=text_widget.yview,
-            style='Overlay.Vertical.TScrollbar',
-        )
-        text_widget.configure(yscrollcommand=scrollbar.set)
         text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         return container, text_widget
 
     def _create_widgets(self):
@@ -297,9 +295,9 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         self.eta_label = tk.Label(self.eta_frame, text="--:--", font=self.label_font, fg=cfg.eta_color, bg=cfg.bg_color, width=8)
         self.eta_label.pack(anchor=tk.W)
 
-        self.eta_bar = tk.Canvas(self.eta_frame, width=160, height=8, bg=cfg.bg_color, highlightthickness=0)
+        self.eta_bar = tk.Canvas(self.eta_frame, width=130, height=8, bg=cfg.bg_color, highlightthickness=0)
         self.eta_bar.pack(anchor=tk.W, pady=(2, 0))
-        self.eta_bar_bg = self.eta_bar.create_rectangle(0, 0, 160, 8, fill="#2a2a2a", outline="")
+        self.eta_bar_bg = self.eta_bar.create_rectangle(0, 0, 130, 8, fill="#2a2a2a", outline="")
         self.eta_bar_progress = self.eta_bar.create_rectangle(0, 0, 0, 8, fill=cfg.eta_color, outline="")
 
         self.token_frame = tk.Frame(bottom_row, bg=cfg.bg_color)
@@ -309,9 +307,9 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         self.token_label = tk.Label(self.token_frame, text="0 / 200k", font=self.label_font, fg=cfg.token_color, bg=cfg.bg_color)
         self.token_label.pack(anchor=tk.E)
 
-        self.token_bar = tk.Canvas(self.token_frame, width=140, height=8, bg=cfg.bg_color, highlightthickness=0)
+        self.token_bar = tk.Canvas(self.token_frame, width=120, height=8, bg=cfg.bg_color, highlightthickness=0)
         self.token_bar.pack(anchor=tk.E, pady=(2, 0))
-        self.token_bar_bg = self.token_bar.create_rectangle(0, 0, 140, 8, fill="#2a2a2a", outline="")
+        self.token_bar_bg = self.token_bar.create_rectangle(0, 0, 120, 8, fill="#2a2a2a", outline="")
 
         # ── Rate limits ──
         rate_row = tk.Frame(self.main_frame, bg=cfg.bg_color)
@@ -491,9 +489,9 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         return container
 
     def _create_layout(self):
+        self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         if self._drawer_open:
             self.drawer_outer_frame.pack(side=tk.LEFT, fill=tk.Y)
-        self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
     def _add_borders(self):
         left_border = tk.Frame(self, bg="#00cc77", width=1)
@@ -508,14 +506,14 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
 
-        drawer_offset = cfg.drawer_width if self._drawer_open else 0
-        x = screen_width + cfg.offset_x - drawer_offset
+        x = screen_width + cfg.offset_x
         y = cfg.offset_y
 
         if x < 0: x = 100
         if y < 0: y = 50
 
-        self.geometry(f"+{x}+{y}")
+        initial_width = cfg.width + (cfg.drawer_width if self._drawer_open else 0)
+        self.geometry(f"{initial_width}x{cfg.height}+{x}+{y}")
 
     def _start_move(self, event):
         self._drag_offset_x = event.x_root - self.winfo_x()
@@ -551,8 +549,10 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         cfg = self.config_data
         dx = event.x_root - self._resize_start_x_root
         dy = event.y_root - self._resize_start_y_root
-        self._current_new_w = max(cfg.min_width, self._resize_start_width + dx)
-        self._current_new_h = max(cfg.min_height, self._resize_start_height + dy)
+        win_min_w = cfg.min_width + (cfg.drawer_width if self._drawer_open else 0)
+        win_max_w = cfg.max_width + (cfg.drawer_width if self._drawer_open else 0)
+        self._current_new_w = max(win_min_w, min(win_max_w, self._resize_start_width + dx))
+        self._current_new_h = max(cfg.min_height, min(cfg.max_height, self._resize_start_height + dy))
 
         if getattr(self, '_resize_outline', None) is not None:
             self._resize_outline.geometry(f"{self._current_new_w}x{self._current_new_h}+{self._resize_start_win_x}+{self._resize_start_win_y}")
@@ -589,23 +589,26 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         current_height = self.winfo_height()
         delta = self.config_data.drawer_width
 
-        self.attributes('-alpha', 0.0)
-
         if visible:
-            self.drawer_outer_frame.pack(side=tk.LEFT, fill=tk.Y, before=self.main_frame)
-            new_x = current_x - delta
             new_width = current_width + delta
+            min_w = self.config_data.min_width + delta
+            self.minsize(min_w, self.config_data.min_height)
+            self.geometry(f"{new_width}x{current_height}+{current_x}+{current_y}")
+            self.update_idletasks()
+            self.drawer_outer_frame.pack(side=tk.LEFT, fill=tk.Y)
         else:
             self.drawer_outer_frame.pack_forget()
-            new_x = current_x + delta
+            self.update_idletasks()
             new_width = current_width - delta
+            min_w = self.config_data.min_width
+            self.minsize(min_w, self.config_data.min_height)
+            self.geometry(f"{new_width}x{current_height}+{current_x}+{current_y}")
 
         self._drawer_open = visible
-        self.geometry(f"{new_width}x{current_height}+{new_x}+{current_y}")
-        self.drawer_toggle_button.config(text="« Chat" if visible else "Chat »")
+        self.drawer_toggle_button.config(text="Chat »" if visible else "« Chat")
         
         self.update_idletasks()
-        self.attributes('-alpha', self.config_data.opacity)
+        self.update()
 
     def _on_reset_rule_selected(self, timezone_name, display_name):
         self.reset_rule_button.config(text=f"Reset: {display_name}")
