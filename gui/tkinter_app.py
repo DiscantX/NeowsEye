@@ -295,9 +295,9 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         self.eta_label = tk.Label(self.eta_frame, text="--:--", font=self.label_font, fg=cfg.eta_color, bg=cfg.bg_color, width=8)
         self.eta_label.pack(anchor=tk.W)
 
-        self.eta_bar = tk.Canvas(self.eta_frame, width=130, height=8, bg=cfg.bg_color, highlightthickness=0)
+        self.eta_bar = tk.Canvas(self.eta_frame, width=100, height=8, bg=cfg.bg_color, highlightthickness=0)
         self.eta_bar.pack(anchor=tk.W, pady=(2, 0))
-        self.eta_bar_bg = self.eta_bar.create_rectangle(0, 0, 130, 8, fill="#2a2a2a", outline="")
+        self.eta_bar_bg = self.eta_bar.create_rectangle(0, 0, 100, 8, fill="#2a2a2a", outline="")
         self.eta_bar_progress = self.eta_bar.create_rectangle(0, 0, 0, 8, fill=cfg.eta_color, outline="")
 
         self.token_frame = tk.Frame(bottom_row, bg=cfg.bg_color)
@@ -307,9 +307,9 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         self.token_label = tk.Label(self.token_frame, text="0 / 200k", font=self.label_font, fg=cfg.token_color, bg=cfg.bg_color)
         self.token_label.pack(anchor=tk.E)
 
-        self.token_bar = tk.Canvas(self.token_frame, width=120, height=8, bg=cfg.bg_color, highlightthickness=0)
+        self.token_bar = tk.Canvas(self.token_frame, width=90, height=8, bg=cfg.bg_color, highlightthickness=0)
         self.token_bar.pack(anchor=tk.E, pady=(2, 0))
-        self.token_bar_bg = self.token_bar.create_rectangle(0, 0, 120, 8, fill="#2a2a2a", outline="")
+        self.token_bar_bg = self.token_bar.create_rectangle(0, 0, 90, 8, fill="#2a2a2a", outline="")
 
         # ── Rate limits ──
         rate_row = tk.Frame(self.main_frame, bg=cfg.bg_color)
@@ -489,9 +489,22 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         return container
 
     def _create_layout(self):
-        self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Packing order determines allocation PRIORITY (which slave's
+        # requested size is honored first when the parent runs out of
+        # room) independent of which edge `side` pulls from. The drawer
+        # is packed FIRST so its fixed width is always reserved before
+        # main_frame claims what's left -- side=tk.RIGHT then pulls that
+        # reserved slice from the right edge, so the drawer sits to the
+        # right of the main panel visually while still winning the
+        # priority fight. main_frame (side=tk.LEFT, expand=True) is
+        # packed last, so it's the one that shrinks under pressure, and
+        # it stays anchored to the window's left edge -- which is what
+        # keeps it at a fixed position relative to the screen when the
+        # drawer toggles, since window x is never changed for that (see
+        # _set_drawer_visible).
         if self._drawer_open:
-            self.drawer_outer_frame.pack(side=tk.LEFT, fill=tk.Y)
+            self.drawer_outer_frame.pack(side=tk.RIGHT, fill=tk.Y)
+        self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
     def _add_borders(self):
         left_border = tk.Frame(self, bg="#00cc77", width=1)
@@ -590,12 +603,26 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         delta = self.config_data.drawer_width
 
         if visible:
-            new_width = current_width + delta
+            new_width = max(current_width + delta, self.config_data.min_width + delta)
             min_w = self.config_data.min_width + delta
             self.minsize(min_w, self.config_data.min_height)
+            # x (and therefore the main panel's on-screen left edge)
+            # is deliberately left untouched here -- only width grows.
+            # Because main_frame is anchored to the window's left edge
+            # and the drawer to its right edge (see _create_layout),
+            # growing the window purely rightward is what keeps the
+            # main panel fixed in place without any separate "move"
+            # step -- nothing to flicker from a geometry change that
+            # isn't happening.
             self.geometry(f"{new_width}x{current_height}+{current_x}+{current_y}")
             self.update_idletasks()
-            self.drawer_outer_frame.pack(side=tk.LEFT, fill=tk.Y)
+            # Re-inserted with before=self.main_frame: main_frame is
+            # already packed continuously (it's never unpacked), so a
+            # plain .pack() here would append the drawer AFTER it in
+            # the slave stacking order, losing priority and
+            # reintroducing the original shrink-to-nothing bug on
+            # every close/open cycle.
+            self.drawer_outer_frame.pack(side=tk.RIGHT, fill=tk.Y, before=self.main_frame)
         else:
             self.drawer_outer_frame.pack_forget()
             self.update_idletasks()

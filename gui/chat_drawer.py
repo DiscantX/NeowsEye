@@ -20,7 +20,7 @@ class ChatDrawerMixin:
         separator_border.pack(side=tk.LEFT, fill=tk.Y)
 
         self.drawer_frame = tk.Frame(
-            self.drawer_outer_frame, bg=cfg.bg_color, width=cfg.drawer_width,
+            self.drawer_outer_frame, bg=cfg.bg_color, width=cfg.drawer_width - 2,
         )
         self.drawer_frame.pack_propagate(False)
         self.drawer_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
