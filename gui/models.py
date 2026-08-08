@@ -24,6 +24,7 @@ class OverlayConfig:
     drawer_width: int = 260  # width of the chat/question drawer panel
     drawer_min_width: int = 260
     drawer_max_width: int = 260
+    # window_border_width = 10
     bg_color: str = "#1a1a1a"
     fg_color: str = "#e0e0e0"
     accent_color: str = "#00ffcc"
@@ -40,6 +41,7 @@ class OverlayConfig:
     font_size: int = 10
     title_font_size: int = 12
     border_color: str = "#333333"
+    window_border_color = border_color
 
 
 @dataclass

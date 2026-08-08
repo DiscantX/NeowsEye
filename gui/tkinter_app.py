@@ -137,30 +137,16 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         self.title_bar = tk.Frame(self.main_frame, bg=cfg.border_color, height=22, cursor="fleur")
         self.title_bar.pack_propagate(False)
 
-        # Drawer toggle button on the LEFT of the title bar
-        self.drawer_toggle_button = tk.Button(
-            self.title_bar,
-            text="« Chat" if self._drawer_open else "Chat »",
-            font=self.mini_font,
-            fg=cfg.accent_color,
-            bg=cfg.border_color,
-            activebackground=cfg.border_color,
-            activeforeground=cfg.fg_color,
-            relief=tk.FLAT, bd=0, cursor="hand2",
-            command=self._toggle_drawer,
-        )
-        self.drawer_toggle_button.pack(side=tk.LEFT, padx=(6, 4))
-
         self.status_dot = tk.Canvas(
             self.title_bar, width=10, height=10,
             bg=cfg.border_color, highlightthickness=0, cursor="fleur",
         )
         self._status_dot_id = self.status_dot.create_oval(1, 1, 9, 9, fill=cfg.dim_color, outline="")
-        self.status_dot.pack(side=tk.LEFT, padx=(4, 4))
+        self.status_dot.pack(side=tk.LEFT, padx=(6, 4))
 
         self.title_label = tk.Label(
             self.title_bar,
-            text="Gemini Coach Overlay",
+            text="Neow's Eye",
             font=self.title_font,
             fg=cfg.accent_color,
             bg=cfg.border_color,
@@ -175,15 +161,33 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
             font=self.label_font,
             fg="#ff6b6b",
             bg=cfg.border_color,
-            activebackground="#442222",
-            activeforeground="#ff9999",
+            activebackground=cfg.error_color,
+            activeforeground="#ffffff",
             relief=tk.FLAT,
             bd=0,
+            cursor="hand2",
             command=self._on_close,
         )
         self.close_button.pack(side=tk.RIGHT, padx=2)
+        self.close_button.bind("<Enter>", lambda e: self.close_button.config(bg=cfg.error_color, fg="#ffffff"))
+        self.close_button.bind("<Leave>", lambda e: self.close_button.config(bg=cfg.border_color, fg=cfg.error_color))
 
-        for widget in (self.title_bar, self.title_label, self.status_dot, self.drawer_toggle_button):
+        self.drawer_toggle_button = tk.Button(
+            self.title_bar,
+            text="Chat «" if self._drawer_open else "Chat »",
+            font=self.mini_font,
+            fg=cfg.accent_color,
+            bg=cfg.border_color,
+            activebackground=cfg.dim_color,
+            activeforeground=cfg.fg_color,
+            relief=tk.FLAT, bd=0, cursor="hand2",
+            command=self._toggle_drawer,
+        )
+        self.drawer_toggle_button.pack(side=tk.RIGHT, padx=(0, 2))
+        self.drawer_toggle_button.bind("<Enter>", lambda e: self.drawer_toggle_button.config(bg=cfg.dim_color, fg="#ffffff"))
+        self.drawer_toggle_button.bind("<Leave>", lambda e: self.drawer_toggle_button.config(bg=cfg.border_color, fg=cfg.accent_color))
+
+        for widget in (self.title_bar, self.title_label, self.status_dot):
             widget.bind('<ButtonPress-1>', self._start_move)
             widget.bind('<B1-Motion>', self._do_move)
         
@@ -356,7 +360,7 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         self.resize_grip.bind('<B1-Motion>', self._do_resize)
         self.resize_grip.bind('<ButtonRelease-1>', self._stop_resize)
 
-        self._add_borders()
+        self._add_borders(cfg)
 
     def _toggle_summary_section(self):
         """Collapses or expands the State of the Game box, shifting space to/from Coach Feedback."""
@@ -506,12 +510,12 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
             self.drawer_outer_frame.pack(side=tk.RIGHT, fill=tk.Y)
         self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-    def _add_borders(self):
-        left_border = tk.Frame(self, bg="#00cc77", width=1)
+    def _add_borders(self, cfg):
+        left_border = tk.Frame(self, bg=cfg.window_border_color, width=1)
         left_border.place(x=0, y=0, relheight=1.0)
-        right_border = tk.Frame(self, bg="#00cc77", width=1)
+        right_border = tk.Frame(self, bg=cfg.window_border_color, width=1)
         right_border.place(relx=1.0, x=-1, y=0, relheight=1.0)
-        bottom_border = tk.Frame(self, bg="#00cc77", height=1)
+        bottom_border = tk.Frame(self, bg=cfg.window_border_color, height=1)
         bottom_border.place(x=0, rely=1.0, y=-1, relwidth=1.0)
 
     def _position_window(self):
@@ -632,7 +636,7 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
             self.geometry(f"{new_width}x{current_height}+{current_x}+{current_y}")
 
         self._drawer_open = visible
-        self.drawer_toggle_button.config(text="Chat »" if visible else "« Chat")
+        self.drawer_toggle_button.config(text="Chat «" if visible else "Chat »")
         
         self.update_idletasks()
         self.update()
