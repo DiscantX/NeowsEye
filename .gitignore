@@ -15,3 +15,5 @@ layout.json
 NeowsEye.code-workspace
 non-feedback-screens.jsonc
 usage_state.json
+fixtures/sample_map_state-crossroads.json
+fixtures/sample_map_state-start.json
