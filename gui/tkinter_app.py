@@ -34,6 +34,7 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
 
         self._drawer_open = DEFAULT_DRAWER_OPEN
         self._prompt_collapsed = True
+        self._summary_collapsed = False
 
         self._setup_window()
         self._setup_fonts()
@@ -197,22 +198,33 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         )
         self.debug_label.pack(fill=tk.X)
 
-        # ── State of the Game Section (Adjustable height via collapsed prompt state) ──
-        summary_container = tk.Frame(self.main_frame, bg=cfg.bg_color)
-        summary_container.pack(fill=tk.X, padx=10, pady=4)
+        # ── State of the Game Section (Collapsible, defaults to expanded) ──
+        summary_outer_container = tk.Frame(self.main_frame, bg=cfg.bg_color)
+        summary_outer_container.pack(fill=tk.X, padx=10, pady=4)
 
-        tk.Label(
-            summary_container, text="STATE OF THE GAME", font=self.label_font,
+        summary_header_row = tk.Frame(summary_outer_container, bg=cfg.bg_color)
+        summary_header_row.pack(fill=tk.X, pady=(0, 3))
+
+        self.summary_toggle_btn = tk.Button(
+            summary_header_row, text="▼ STATE OF THE GAME", font=self.label_font,
             fg=cfg.summary_color, bg=cfg.bg_color,
-        ).pack(anchor=tk.W, pady=(0, 3))
+            activebackground=cfg.bg_color, activeforeground=cfg.accent_color,
+            relief=tk.FLAT, bd=0, cursor="hand2", anchor="w",
+            command=self._toggle_summary_section
+        )
+        self.summary_toggle_btn.pack(side=tk.LEFT, fill=tk.X)
+
+        self.summary_content_frame = tk.Frame(summary_outer_container, bg=cfg.bg_color)
 
         summary_box, self.summary_text = self._make_scrollable_text(
-            summary_container, height=4,
+            self.summary_content_frame, height=4,
             fg_color=cfg.summary_color, font=self.small_font,
         )
         summary_box.pack(fill=tk.X)
 
-        self._add_divider()
+        self.summary_content_frame.pack(fill=tk.X, pady=(0, 3))
+
+        self._add_draggable_divider(lambda: self.summary_text, lambda: self.feedback_text)
 
         # ── Coaching Feedback Section (PRIMARY ELEMENT) ──
         feedback_container = tk.Frame(self.main_frame, bg=cfg.bg_color)
@@ -242,7 +254,7 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         self.feedback_text.tag_configure('timestamp', foreground=cfg.dim_color, font=self.mini_font)
         self.feedback_text.tag_configure('body', foreground=cfg.feedback_color, font=self.text_font)
 
-        self._add_divider()
+        self._add_draggable_divider(lambda: self.feedback_text, lambda: self.prompt_text)
 
         # ── Prompt Section (Collapsible, defaults to collapsed) ──
         prompt_outer_container = tk.Frame(self.main_frame, bg=cfg.bg_color)
@@ -345,21 +357,135 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
 
         self._add_borders()
 
+    def _toggle_summary_section(self):
+        """Collapses or expands the State of the Game box, shifting space to/from Coach Feedback."""
+        summary_height = self.summary_text.cget('height')
+        feedback_height = self.feedback_text.cget('height')
+
+        if self._summary_collapsed:
+            needed = summary_height
+            if feedback_height - needed >= 2:
+                self.feedback_text.config(height=feedback_height - needed)
+            self.summary_content_frame.pack(fill=tk.X, pady=(0, 3))
+            self.summary_toggle_btn.config(text="▼ STATE OF THE GAME")
+            self._summary_collapsed = False
+        else:
+            gained = summary_height
+            self.summary_content_frame.pack_forget()
+            self.summary_toggle_btn.config(text="▶ STATE OF THE GAME")
+            self._summary_collapsed = True
+            self.feedback_text.config(height=feedback_height + gained)
+
     def _toggle_prompt_section(self):
-        """Collapses or expands the Last Prompt box, extending/reducing State of the Game by exact gained space."""
+        """Collapses or expands the Last Prompt box, shifting space to/from Coach Feedback."""
+        prompt_height = self.prompt_text.cget('height')
+        feedback_height = self.feedback_text.cget('height')
+
         if self._prompt_collapsed:
+            needed = prompt_height
+            if feedback_height - needed >= 2:
+                self.feedback_text.config(height=feedback_height - needed)
             self.prompt_content_frame.pack(fill=tk.X, pady=(0, 3))
             self.prompt_toggle_btn.config(text="▼ LAST PROMPT")
             self._prompt_collapsed = False
-            self.summary_text.config(height=4)
         else:
+            gained = prompt_height
             self.prompt_content_frame.pack_forget()
             self.prompt_toggle_btn.config(text="▶ LAST PROMPT")
             self._prompt_collapsed = True
-            self.summary_text.config(height=8)
+            self.feedback_text.config(height=feedback_height + gained)
 
     def _add_divider(self):
-        tk.Frame(self.main_frame, bg=self.config_data.border_color, height=1).pack(fill=tk.X, padx=10)
+        return tk.Frame(self.main_frame, bg=self.config_data.border_color, height=1).pack(fill=tk.X, padx=10, pady=(4, 4))
+
+    def _add_draggable_divider(self, get_above=None, get_below=None):
+        container = tk.Frame(self.main_frame, bg=self.config_data.bg_color, height=9, cursor="sb_v_double_arrow")
+        container.pack_propagate(False)
+        container.pack(fill=tk.X, padx=10, pady=(1, 1))
+
+        line = tk.Frame(container, bg=self.config_data.border_color, height=1)
+        line.pack(fill=tk.X, pady=4)
+
+        if get_above is not None and get_below is not None:
+            def start_drag(event):
+                text_widget_above = get_above()
+                text_widget_below = get_below()
+                if text_widget_above is getattr(self, 'summary_text', None) and self._summary_collapsed:
+                    container._dragging = False
+                    return
+                if text_widget_above is getattr(self, 'prompt_text', None) and self._prompt_collapsed:
+                    container._dragging = False
+                    return
+                if text_widget_below is getattr(self, 'summary_text', None) and self._summary_collapsed:
+                    container._dragging = False
+                    return
+                if text_widget_below is getattr(self, 'prompt_text', None) and self._prompt_collapsed:
+                    container._dragging = False
+                    return
+
+                container._dragging = True
+                container._drag_start_y = event.y_root
+                try:
+                    font_obj = tkfont.Font(font=text_widget_above.cget('font'))
+                    container._line_height = font_obj.metrics('linespace')
+                except Exception:
+                    container._line_height = 16
+                if container._line_height < 5:
+                    container._line_height = 16
+                container._accum_dy = 0
+
+            def do_drag(event):
+                if not getattr(container, '_dragging', False):
+                    return
+                dy = event.y_root - container._drag_start_y
+                line_h = container._line_height
+                delta_lines = round((dy - container._accum_dy) / line_h)
+                if delta_lines != 0:
+                    text_widget_above = get_above()
+                    text_widget_below = get_below()
+                    curr_above = text_widget_above.cget('height')
+                    curr_below = text_widget_below.cget('height')
+
+                    try:
+                        font_above = tkfont.Font(font=text_widget_above.cget('font'))
+                        h_above = font_above.metrics('linespace')
+                    except Exception:
+                        h_above = 16
+                    try:
+                        font_below = tkfont.Font(font=text_widget_below.cget('font'))
+                        h_below = font_below.metrics('linespace')
+                    except Exception:
+                        h_below = 16
+
+                    if h_above < 5: h_above = 16
+                    if h_below < 5: h_below = 16
+
+                    if delta_lines > 0:
+                        target_above = curr_above + delta_lines
+                        px_needed = delta_lines * h_above
+                        lines_below_reduction = round(px_needed / h_below)
+                        target_below = curr_below - lines_below_reduction
+                        if target_below < 2:
+                            target_below = 2
+                            max_reduction = curr_below - 2
+                            target_above = curr_above + round((max_reduction * h_below) / h_above)
+                    else:
+                        target_above = max(2, curr_above + delta_lines)
+                        actual_reduction = curr_above - target_above
+                        px_gained = actual_reduction * h_above
+                        lines_below_increase = round(px_gained / h_below)
+                        target_below = curr_below + lines_below_increase
+
+                    actual_delta_above = target_above - curr_above
+                    if actual_delta_above != 0:
+                        text_widget_above.config(height=target_above)
+                        text_widget_below.config(height=target_below)
+                        container._accum_dy += actual_delta_above * line_h
+
+            for widget in (container, line):
+                widget.bind('<ButtonPress-1>', start_drag)
+                widget.bind('<B1-Motion>', do_drag)
+        return container
 
     def _create_layout(self):
         if self._drawer_open:
@@ -410,6 +536,10 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         new_w = max(cfg.min_width, self._resize_start_width + dx)
         new_h = max(cfg.min_height, self._resize_start_height + dy)
         self.geometry(f"{new_w}x{new_h}")
+        self._resize_start_x_root = event.x_root
+        self._resize_start_y_root = event.y_root
+        self._resize_start_width = new_w
+        self._resize_start_height = new_h
 
     def _on_close(self):
         if self._on_close_callback:
