@@ -49,6 +49,7 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         self._eta_thread: Optional[threading.Thread] = None
         self._running = True
         self._feedback_entry_count = 0
+        self._resize_job = None
         
         self._on_reset_rule_change = on_reset_rule_change
 
@@ -59,6 +60,7 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         """Configure the main window properties."""
         cfg = self.config_data
         self.title("Gemini Coach Overlay")
+        self.configure(bg=cfg.bg_color)
         self.overrideredirect(True)
         self.attributes('-topmost', True)
         self.attributes('-alpha', cfg.opacity)
@@ -354,6 +356,7 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         self.resize_grip.place(relx=1.0, rely=1.0, anchor='se')
         self.resize_grip.bind('<ButtonPress-1>', self._start_resize)
         self.resize_grip.bind('<B1-Motion>', self._do_resize)
+        self.resize_grip.bind('<ButtonRelease-1>', self._stop_resize)
 
         self._add_borders()
 
@@ -528,18 +531,44 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         self._resize_start_y_root = event.y_root
         self._resize_start_width = self.winfo_width()
         self._resize_start_height = self.winfo_height()
+        self._resize_start_win_x = self.winfo_x()
+        self._resize_start_win_y = self.winfo_y()
+        self._current_new_w = self._resize_start_width
+        self._current_new_h = self._resize_start_height
+
+        cfg = self.config_data
+        self._resize_outline = tk.Toplevel(self)
+        self._resize_outline.overrideredirect(True)
+        self._resize_outline.attributes('-topmost', True)
+        try:
+            self._resize_outline.attributes('-alpha', 0.3)
+        except Exception:
+            pass
+        self._resize_outline.configure(bg=cfg.accent_color)
+        self._resize_outline.geometry(f"{self._resize_start_width}x{self._resize_start_height}+{self._resize_start_win_x}+{self._resize_start_win_y}")
 
     def _do_resize(self, event):
         cfg = self.config_data
         dx = event.x_root - self._resize_start_x_root
         dy = event.y_root - self._resize_start_y_root
-        new_w = max(cfg.min_width, self._resize_start_width + dx)
-        new_h = max(cfg.min_height, self._resize_start_height + dy)
-        self.geometry(f"{new_w}x{new_h}")
-        self._resize_start_x_root = event.x_root
-        self._resize_start_y_root = event.y_root
-        self._resize_start_width = new_w
-        self._resize_start_height = new_h
+        self._current_new_w = max(cfg.min_width, self._resize_start_width + dx)
+        self._current_new_h = max(cfg.min_height, self._resize_start_height + dy)
+
+        if getattr(self, '_resize_outline', None) is not None:
+            self._resize_outline.geometry(f"{self._current_new_w}x{self._current_new_h}+{self._resize_start_win_x}+{self._resize_start_win_y}")
+
+    def _commit_resize(self):
+        pass
+
+    def _stop_resize(self, event):
+        if getattr(self, '_resize_outline', None) is not None:
+            self._resize_outline.destroy()
+            self._resize_outline = None
+
+        if hasattr(self, '_current_new_w') and hasattr(self, '_current_new_h'):
+            self.geometry(f"{self._current_new_w}x{self._current_new_h}")
+            self.update_idletasks()
+            self.update()
 
     def _on_close(self):
         if self._on_close_callback:
