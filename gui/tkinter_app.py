@@ -3,7 +3,7 @@ Tkinter Overlay for Coaching Feedback
 ======================================
 Always-on-top overlay window that displays:
 1. Primary coaching feedback, appended as a scrollable history (live)
-2. Last prompt to Gemini (scrollable)
+2. Last prompt to Gemini (collapsible)
 3. ETA countdown for response
 4. Token usage/estimated limit
 5. Connection status
@@ -45,11 +45,6 @@ class OverlayConfig:
     error_color: str = "#ff4466"
     dim_color: str = "#888888"
     summary_color: str = "#ffd966"
-    # Real (blended) translucency only -- see _setup_window for why this
-    # window deliberately does NOT also use a color-key transparency
-    # trick. A lower value is more see-through but less legible over
-    # bright content (e.g. the in-game map); this is the tuned middle
-    # ground, not a hard requirement.
     opacity: float = 0.93
     font_family: str = "Segoe UI"
     font_size: int = 10
@@ -72,10 +67,7 @@ class FeedbackData:
 
 
 def _resolve_font_family(preferred: str) -> str:
-    """Falls back to a common cross-platform font if `preferred` isn't
-    installed -- e.g. Segoe UI is Windows-only, and this overlay may
-    well be developed/tested on a non-Windows machine before it's ever
-    run under ModTheSpire."""
+    """Falls back to a common cross-platform font if `preferred` isn't installed."""
     try:
         available = set(tkfont.families())
     except tk.TclError:
@@ -88,7 +80,7 @@ def _resolve_font_family(preferred: str) -> str:
     return preferred
 
 
-# ─── Main Overlay Class ────────────────────────────────────────────────────────
+# ─── Main Overlay Class ────────────────────────────────────────────────        
 
 class CoachOverlay(tk.Tk):
     """Main overlay window that stays always-on-top."""
@@ -99,26 +91,17 @@ class CoachOverlay(tk.Tk):
 
         self.config_data = config or OverlayConfig()
         self.config_data.font_family = _resolve_font_family(self.config_data.font_family)
-        # Called from _on_close, before this window is torn down --
-        # e.g. gui_main.py hooks this to close the StreamClient socket
-        # so the background coaching loop shuts down cleanly instead of
-        # being left blocked on a read that will never resolve.
         self._on_close_callback = on_close
-        # Called with (message_text, message_type) when the player sends
-        # a chat drawer message -- gui_main.py wires this to
-        # GeminiWorker.submit_player_message(). None-safe: see
-        # _handle_send() for the not-connected-yet fallback.
         self._on_send_message = on_send_message
 
-        # Must be set before _setup_window()/_position_window() -- both
-        # need the drawer's initial state to compute correct geometry.
         self._drawer_open = DEFAULT_DRAWER_OPEN
+        self._prompt_collapsed = True
 
         self._setup_window()
         self._setup_fonts()
         self._setup_styles()
-        self._create_widgets()
         self._create_drawer_widgets()
+        self._create_widgets()
         self._create_layout()
 
         # Data state
@@ -136,57 +119,23 @@ class CoachOverlay(tk.Tk):
     def _setup_window(self):
         """Configure the main window properties."""
         self.title("Gemini Coach Overlay")
-
-        # Remove window decorations
         self.overrideredirect(True)
-
-        # Always on top - critical for overlay over game
         self.attributes('-topmost', True)
-
-        # Real (blended) translucency. Deliberately NOT combined with
-        # Windows' -transparentcolor color-keying: that trick makes any
-        # pixel matching bg_color fully invisible (not blended), which
-        # is what made text unreadable over bright game content like
-        # the map -- there was no darkened panel behind it at all, just
-        # raw game pixels. Alpha blending keeps a legible dark card
-        # over anything behind the window, at the cost of a square
-        # (rather than color-keyed/irregular) window shape.
         self.attributes('-alpha', self.config_data.opacity)
 
-        # Set geometry -- includes the drawer's width up front if it's
-        # open by default, so the window doesn't visibly resize on
-        # first paint.
         initial_width = self.config_data.width + (
             self.config_data.drawer_width if self._drawer_open else 0
         )
         self.geometry(f"{initial_width}x{self.config_data.height}")
-
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _setup_fonts(self):
         """Initialize font objects."""
-        self.title_font = tkfont.Font(
-            family=self.config_data.font_family,
-            size=self.config_data.title_font_size,
-            weight='bold'
-        )
-        self.label_font = tkfont.Font(
-            family=self.config_data.font_family,
-            size=self.config_data.font_size,
-            weight='bold'
-        )
-        self.text_font = tkfont.Font(
-            family=self.config_data.font_family,
-            size=self.config_data.font_size,
-        )
-        self.small_font = tkfont.Font(
-            family=self.config_data.font_family,
-            size=9,
-        )
-        self.mini_font = tkfont.Font(
-            family=self.config_data.font_family,
-            size=8,
-        )
+        self.title_font = tkfont.Font(family=self.config_data.font_family, size=self.config_data.title_font_size, weight='bold')
+        self.label_font = tkfont.Font(family=self.config_data.font_family, size=self.config_data.font_size, weight='bold')
+        self.text_font = tkfont.Font(family=self.config_data.font_family, size=self.config_data.font_size)
+        self.small_font = tkfont.Font(family=self.config_data.font_family, size=9)
+        self.mini_font = tkfont.Font(family=self.config_data.font_family, size=8)
 
     def _setup_styles(self):
         """Configure ttk styles."""
@@ -196,9 +145,6 @@ class CoachOverlay(tk.Tk):
         style.configure('TFrame', background=self.config_data.bg_color)
         style.configure('TLabeledScale', background=self.config_data.bg_color)
 
-        # Dark, flat scrollbar matching the overlay theme -- ttk's
-        # default scrollbar is a light system widget that would stick
-        # out badly against this panel.
         style.configure(
             'Overlay.Vertical.TScrollbar',
             background=self.config_data.border_color,
@@ -214,14 +160,7 @@ class CoachOverlay(tk.Tk):
         )
 
     def _make_scrollable_text(self, parent, height, fg_color, font, wrap=tk.WORD):
-        """Text + Scrollbar as siblings in their own frame -- the
-        pattern both the feedback and prompt panels use. (Previously
-        the feedback panel used scrolledtext.ScrolledText, which bundles
-        its own internal scrollbar, AND had a second scrollbar wired on
-        top of it; that second wiring silently disconnected the first,
-        leaving two non-functional scrollbars stacked on each other.
-        One explicit scrollbar per text box, wired directly, avoids
-        that class of bug entirely.)"""
+        """Creates a scrollable text area component container."""
         container = tk.Frame(parent, bg=self.config_data.bg_color)
         text_widget = tk.Text(
             container,
@@ -249,19 +188,33 @@ class CoachOverlay(tk.Tk):
         return container, text_widget
 
     def _create_widgets(self):
-        """Create individual widget components."""
+        """Create individual widget components for the main panel."""
         self.main_frame = tk.Frame(self, bg=self.config_data.bg_color)
 
-        # ── Title bar section (draggable) ──
-        self.title_bar = tk.Frame(self.main_frame, bg=self.config_data.border_color, height=22)
+        # ── Title bar section (draggable across both panels & cursor fix) ──
+        self.title_bar = tk.Frame(self.main_frame, bg=self.config_data.border_color, height=22, cursor="fleur")
         self.title_bar.pack_propagate(False)
+
+        # Drawer toggle button on the LEFT of the title bar
+        self.drawer_toggle_button = tk.Button(
+            self.title_bar,
+            text="« Chat" if self._drawer_open else "Chat »",
+            font=self.mini_font,
+            fg=self.config_data.accent_color,
+            bg=self.config_data.border_color,
+            activebackground=self.config_data.border_color,
+            activeforeground=self.config_data.fg_color,
+            relief=tk.FLAT, bd=0, cursor="hand2",
+            command=self._toggle_drawer,
+        )
+        self.drawer_toggle_button.pack(side=tk.LEFT, padx=(6, 4))
 
         self.status_dot = tk.Canvas(
             self.title_bar, width=10, height=10,
-            bg=self.config_data.border_color, highlightthickness=0,
+            bg=self.config_data.border_color, highlightthickness=0, cursor="fleur",
         )
         self._status_dot_id = self.status_dot.create_oval(1, 1, 9, 9, fill=self.config_data.dim_color, outline="")
-        self.status_dot.pack(side=tk.LEFT, padx=(8, 4))
+        self.status_dot.pack(side=tk.LEFT, padx=(4, 4))
 
         self.title_label = tk.Label(
             self.title_bar,
@@ -272,6 +225,7 @@ class CoachOverlay(tk.Tk):
             cursor="fleur",
         )
         self.title_label.pack(side=tk.LEFT)
+        
         self.close_button = tk.Button(
             self.title_bar,
             text="×",
@@ -287,31 +241,13 @@ class CoachOverlay(tk.Tk):
         )
         self.close_button.pack(side=tk.RIGHT, padx=2)
 
-        self.drawer_toggle_button = tk.Button(
-            self.title_bar,
-            text="Chat «" if self._drawer_open else "Chat »",
-            font=self.mini_font,
-            fg=self.config_data.accent_color,
-            bg=self.config_data.border_color,
-            activebackground=self.config_data.border_color,
-            activeforeground=self.config_data.fg_color,
-            relief=tk.FLAT, bd=0, cursor="hand2",
-            command=self._toggle_drawer,
-        )
-        self.drawer_toggle_button.pack(side=tk.RIGHT, padx=(0, 4))
-
-        # Dragging is bound only to the title bar (not the whole
-        # window) -- binding it on self previously meant every click
-        # anywhere, including on the scrollbars and text boxes, also
-        # triggered a drag-start, which is part of why interacting with
-        # those felt broken.
-        for widget in (self.title_bar, self.title_label, self.status_dot):
+        for widget in (self.title_bar, self.title_label, self.status_dot, self.drawer_toggle_button):
             widget.bind('<ButtonPress-1>', self._start_move)
             widget.bind('<B1-Motion>', self._do_move)
         
         self.title_bar.pack(fill=tk.X, side=tk.TOP)
 
-        # ── Debug line (screen_type / event kind) ──
+        # ── Debug line ──
         debug_frame = tk.Frame(self.main_frame, bg=self.config_data.bg_color)
         debug_frame.pack(fill=tk.X, padx=10, pady=(4, 0))
         self.debug_label = tk.Label(
@@ -320,7 +256,7 @@ class CoachOverlay(tk.Tk):
         )
         self.debug_label.pack(fill=tk.X)
 
-        # ── State of the Game Section ──
+        # ── State of the Game Section (Adjustable height via collapsed prompt state) ──
         summary_container = tk.Frame(self.main_frame, bg=self.config_data.bg_color)
         summary_container.pack(fill=tk.X, padx=10, pady=4)
 
@@ -362,29 +298,37 @@ class CoachOverlay(tk.Tk):
             fg_color=self.config_data.feedback_color, font=self.text_font,
         )
         feedback_box.pack(fill=tk.BOTH, expand=True)
-        self.feedback_text.tag_configure(
-            'timestamp', foreground=self.config_data.dim_color, font=self.mini_font,
-        )
-        self.feedback_text.tag_configure(
-            'body', foreground=self.config_data.feedback_color, font=self.text_font,
-        )
+        self.feedback_text.tag_configure('timestamp', foreground=self.config_data.dim_color, font=self.mini_font)
+        self.feedback_text.tag_configure('body', foreground=self.config_data.feedback_color, font=self.text_font)
 
         self._add_divider()
 
-        # ── Prompt Section ──
-        prompt_container = tk.Frame(self.main_frame, bg=self.config_data.bg_color)
-        prompt_container.pack(fill=tk.X, padx=10, pady=4)
+        # ── Prompt Section (Collapsible, defaults to collapsed) ──
+        prompt_outer_container = tk.Frame(self.main_frame, bg=self.config_data.bg_color)
+        prompt_outer_container.pack(fill=tk.X, padx=10, pady=4)
 
-        tk.Label(
-            prompt_container, text="LAST PROMPT", font=self.label_font,
+        prompt_header_row = tk.Frame(prompt_outer_container, bg=self.config_data.bg_color)
+        prompt_header_row.pack(fill=tk.X, pady=(0, 3))
+        
+        self.prompt_toggle_btn = tk.Button(
+            prompt_header_row, text="▶ LAST PROMPT", font=self.label_font,
             fg=self.config_data.prompt_color, bg=self.config_data.bg_color,
-        ).pack(anchor=tk.W, pady=(0, 3))
+            activebackground=self.config_data.bg_color, activeforeground=self.config_data.accent_color,
+            relief=tk.FLAT, bd=0, cursor="hand2", anchor="w",
+            command=self._toggle_prompt_section
+        )
+        self.prompt_toggle_btn.pack(side=tk.LEFT, fill=tk.X)
 
+        self.prompt_content_frame = tk.Frame(prompt_outer_container, bg=self.config_data.bg_color)
+        
+        # Keep initial height set to 4 lines when expanded, exactly matching requested expansion bounds
         prompt_box, self.prompt_text = self._make_scrollable_text(
-            prompt_container, height=4,
+            self.prompt_content_frame, height=4,
             fg_color=self.config_data.prompt_color, font=self.small_font,
         )
         prompt_box.pack(fill=tk.X)
+        
+        self.prompt_content_frame.pack_forget()
 
         self._add_divider()
 
@@ -395,21 +339,11 @@ class CoachOverlay(tk.Tk):
         self.eta_frame = tk.Frame(bottom_row, bg=self.config_data.bg_color)
         self.eta_frame.pack(side=tk.LEFT)
 
-        tk.Label(
-            self.eta_frame, text="ETA", font=self.small_font,
-            fg=self.config_data.dim_color, bg=self.config_data.bg_color,
-        ).pack(anchor=tk.W)
-
-        self.eta_label = tk.Label(
-            self.eta_frame, text="--:--", font=self.label_font,
-            fg=self.config_data.eta_color, bg=self.config_data.bg_color, width=8,
-        )
+        tk.Label(self.eta_frame, text="ETA", font=self.small_font, fg=self.config_data.dim_color, bg=self.config_data.bg_color).pack(anchor=tk.W)
+        self.eta_label = tk.Label(self.eta_frame, text="--:--", font=self.label_font, fg=self.config_data.eta_color, bg=self.config_data.bg_color, width=8)
         self.eta_label.pack(anchor=tk.W)
 
-        self.eta_bar = tk.Canvas(
-            self.eta_frame, width=160, height=8,
-            bg=self.config_data.bg_color, highlightthickness=0,
-        )
+        self.eta_bar = tk.Canvas(self.eta_frame, width=160, height=8, bg=self.config_data.bg_color, highlightthickness=0)
         self.eta_bar.pack(anchor=tk.W, pady=(2, 0))
         self.eta_bar_bg = self.eta_bar.create_rectangle(0, 0, 160, 8, fill="#2a2a2a", outline="")
         self.eta_bar_progress = self.eta_bar.create_rectangle(0, 0, 0, 8, fill=self.config_data.eta_color, outline="")
@@ -417,61 +351,35 @@ class CoachOverlay(tk.Tk):
         self.token_frame = tk.Frame(bottom_row, bg=self.config_data.bg_color)
         self.token_frame.pack(side=tk.RIGHT)
 
-        tk.Label(
-            self.token_frame, text="TPM", font=self.small_font,
-            fg=self.config_data.dim_color, bg=self.config_data.bg_color,
-        ).pack(anchor=tk.E)
-
-        self.token_label = tk.Label(
-            self.token_frame, text="0 / 200k", font=self.label_font,
-            fg=self.config_data.token_color, bg=self.config_data.bg_color,
-        )
+        tk.Label(self.token_frame, text="TPM", font=self.small_font, fg=self.config_data.dim_color, bg=self.config_data.bg_color).pack(anchor=tk.E)
+        self.token_label = tk.Label(self.token_frame, text="0 / 200k", font=self.label_font, fg=self.config_data.token_color, bg=self.config_data.bg_color)
         self.token_label.pack(anchor=tk.E)
 
-        self.token_bar = tk.Canvas(
-            self.token_frame, width=140, height=8,
-            bg=self.config_data.bg_color, highlightthickness=0,
-        )
+        self.token_bar = tk.Canvas(self.token_frame, width=140, height=8, bg=self.config_data.bg_color, highlightthickness=0)
         self.token_bar.pack(anchor=tk.E, pady=(2, 0))
         self.token_bar_bg = self.token_bar.create_rectangle(0, 0, 140, 8, fill="#2a2a2a", outline="")
 
         # ── Rate limits ──
         rate_row = tk.Frame(self.main_frame, bg=self.config_data.bg_color)
         rate_row.pack(fill=tk.X, padx=10, pady=(2, 4))
-        self.rate_daily_label = tk.Label(
-            rate_row, text="Today: -- / --", font=self.small_font,
-            fg=self.config_data.dim_color, bg=self.config_data.bg_color,
-        )
+        self.rate_daily_label = tk.Label(rate_row, text="Today: -- / --", font=self.small_font, fg=self.config_data.dim_color, bg=self.config_data.bg_color)
         self.rate_daily_label.pack(side=tk.LEFT)
-        self.rate_minute_label = tk.Label(
-            rate_row, text="-- / -- RPM", font=self.small_font,
-            fg=self.config_data.dim_color, bg=self.config_data.bg_color,
-        )
+        self.rate_minute_label = tk.Label(rate_row, text="-- / -- RPM", font=self.small_font, fg=self.config_data.dim_color, bg=self.config_data.bg_color)
         self.rate_minute_label.pack(side=tk.RIGHT)
         
-        self.daily_tokens_label = tk.Label(
-            rate_row, text="0 tokens today", font=self.small_font,
-            fg=self.config_data.dim_color, bg=self.config_data.bg_color,
-        )
+        self.daily_tokens_label = tk.Label(rate_row, text="0 tokens today", font=self.small_font, fg=self.config_data.dim_color, bg=self.config_data.bg_color)
         self.daily_tokens_label.pack(side=tk.LEFT, padx=(12, 0))
 
-    # ── Reset timer ──
+        # ── Reset timer ──
         self.reset_rule_button = tk.Menubutton(
             rate_row, text="Reset: Pacific", font=self.mini_font,
             fg=self.config_data.dim_color, bg=self.config_data.bg_color,
             activebackground=self.config_data.border_color, activeforeground=self.config_data.fg_color,
             relief=tk.FLAT, bd=0, cursor="hand2",
         )
-        reset_menu = tk.Menu(self.reset_rule_button, tearoff=0,
-                              bg=self.config_data.bg_color, fg=self.config_data.fg_color)
-        reset_menu.add_command(
-            label="Pacific (Google default)",
-            command=lambda: self._on_reset_rule_selected("America/Los_Angeles", "Pacific"),
-        )
-        reset_menu.add_command(
-            label="Local time",
-            command=lambda: self._on_reset_rule_selected("local", "Local"),
-        )
+        reset_menu = tk.Menu(self.reset_rule_button, tearoff=0, bg=self.config_data.bg_color, fg=self.config_data.fg_color)
+        reset_menu.add_command(label="Pacific (Google default)", command=lambda: self._on_reset_rule_selected("America/Los_Angeles", "Pacific"))
+        reset_menu.add_command(label="Local time", command=lambda: self._on_reset_rule_selected("local", "Local"))
         self.reset_rule_button.config(menu=reset_menu)
         self.reset_rule_button.pack(side=tk.RIGHT, padx=(0, 8))
 
@@ -484,21 +392,13 @@ class CoachOverlay(tk.Tk):
             fg=self.config_data.accent_color, bg=self.config_data.border_color,
             anchor='e', padx=8, pady=2,
         )
-        self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 20))
 
-        # Resize grip -- overrideredirect windows lose the OS's native
-        # resize handles/border along with their title bar, so without
-        # this the window is permanently stuck at its initial size.
-        self.resize_grip = tk.Canvas(
-            self, width=14, height=14, bg=self.config_data.border_color,
-            highlightthickness=0, cursor="sizing",
-        )
+        # Resize grip
+        self.resize_grip = tk.Canvas(self, width=14, height=14, bg=self.config_data.border_color, highlightthickness=0, cursor="sizing")
         for i in range(3):
             offset = i * 4
-            self.resize_grip.create_line(
-                2 + offset, 12, 12, 2 + offset,
-                fill=self.config_data.dim_color, width=1,
-            )
+            self.resize_grip.create_line(2 + offset, 12, 12, 2 + offset, fill=self.config_data.dim_color, width=1)
         self.resize_grip.place(relx=1.0, rely=1.0, anchor='se')
         self.resize_grip.bind('<ButtonPress-1>', self._start_resize)
         self.resize_grip.bind('<B1-Motion>', self._do_resize)
@@ -506,24 +406,32 @@ class CoachOverlay(tk.Tk):
         self._add_borders()
 
     def _create_drawer_widgets(self):
-        """Builds the chat/question drawer -- a separate root-level
-        frame (sibling of main_frame, not nested inside it) so it can
-        be packed/unpacked independently in _set_drawer_visible()
-        without disturbing the main panel's layout. Fixed width via
-        pack_propagate(False); toggling grows/shrinks the WINDOW, not
-        this frame -- see _set_drawer_visible()."""
+        """Builds the chat/question drawer panel with a multi-line input box and grey border separator."""
+        self.drawer_outer_frame = tk.Frame(self, bg=self.config_data.bg_color, cursor="fleur")
+        
         self.drawer_frame = tk.Frame(
-            self, bg=self.config_data.bg_color, width=self.config_data.drawer_width,
+            self.drawer_outer_frame, bg=self.config_data.bg_color, width=self.config_data.drawer_width,
         )
         self.drawer_frame.pack_propagate(False)
+        self.drawer_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        header = tk.Frame(self.drawer_frame, bg=self.config_data.border_color, height=22)
-        header.pack_propagate(False)
-        header.pack(fill=tk.X, side=tk.TOP)
-        tk.Label(
-            header, text="ASK THE COACH", font=self.label_font,
+        separator_border = tk.Frame(self.drawer_outer_frame, bg=self.config_data.border_color, width=2)
+        separator_border.pack(side=tk.RIGHT, fill=tk.Y)
+
+        drawer_header = tk.Frame(self.drawer_frame, bg=self.config_data.border_color, height=22, cursor="fleur")
+        drawer_header.pack_propagate(False)
+        drawer_header.pack(fill=tk.X, side=tk.TOP)
+        
+        drawer_header_label = tk.Label(
+            drawer_header, text="ASK THE COACH", font=self.label_font,
             fg=self.config_data.accent_color, bg=self.config_data.border_color,
-        ).pack(side=tk.LEFT, padx=8)
+            cursor="fleur",
+        )
+        drawer_header_label.pack(side=tk.LEFT, padx=8)
+
+        for widget in (drawer_header, drawer_header_label):
+            widget.bind('<ButtonPress-1>', self._start_move)
+            widget.bind('<B1-Motion>', self._do_move)
 
         chat_container = tk.Frame(self.drawer_frame, bg=self.config_data.bg_color)
         chat_container.pack(fill=tk.BOTH, expand=True, padx=8, pady=(6, 4))
@@ -532,19 +440,10 @@ class CoachOverlay(tk.Tk):
             fg_color=self.config_data.fg_color, font=self.small_font,
         )
         chat_box.pack(fill=tk.BOTH, expand=True)
-        self.chat_text.tag_configure(
-            'player', foreground=self.config_data.fg_color, font=self.small_font,
-        )
-        self.chat_text.tag_configure(
-            'coach', foreground=self.config_data.feedback_color, font=self.small_font,
-        )
-        self.chat_text.tag_configure(
-            'chat_label', foreground=self.config_data.dim_color, font=self.mini_font,
-        )
+        self.chat_text.tag_configure('player', foreground=self.config_data.fg_color, font=self.small_font)
+        self.chat_text.tag_configure('coach', foreground=self.config_data.feedback_color, font=self.small_font)
+        self.chat_text.tag_configure('chat_label', foreground=self.config_data.dim_color, font=self.mini_font)
 
-        # Question / Feedback -- both go through the same player_message
-        # task kind; message_type is carried in the payload for the
-        # system prompt to key off of.
         self.message_type_var = tk.StringVar(value="question")
         type_row = tk.Frame(self.drawer_frame, bg=self.config_data.bg_color)
         type_row.pack(fill=tk.X, padx=8, pady=(0, 4))
@@ -558,15 +457,17 @@ class CoachOverlay(tk.Tk):
 
         input_row = tk.Frame(self.drawer_frame, bg=self.config_data.bg_color)
         input_row.pack(fill=tk.X, padx=8, pady=(0, 8))
-        self.chat_entry = tk.Entry(
+        
+        self.chat_entry = tk.Text(
             input_row, font=self.small_font, bg=self.config_data.bg_color,
             fg=self.config_data.fg_color, insertbackground=self.config_data.fg_color,
             relief=tk.FLAT, highlightthickness=1,
             highlightbackground=self.config_data.border_color,
             highlightcolor=self.config_data.accent_color,
+            height=3, wrap=tk.WORD
         )
-        self.chat_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
-        self.chat_entry.bind('<Return>', lambda event: self._handle_send())
+        self.chat_entry.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 4))
+        self.chat_entry.bind('<Return>', self._handle_text_return)
 
         send_button = tk.Button(
             input_row, text="Send", font=self.mini_font,
@@ -576,27 +477,39 @@ class CoachOverlay(tk.Tk):
             relief=tk.FLAT, bd=0, cursor="hand2",
             command=self._handle_send,
         )
-        send_button.pack(side=tk.RIGHT, padx=(6, 0))
+        send_button.pack(side=tk.RIGHT, anchor="s", padx=(2, 0))
+
+    def _handle_text_return(self, event):
+        if event.state & 0x0001:
+            return 
+        else:
+            self._handle_send()
+            return "break"
+
+    def _toggle_prompt_section(self):
+        """Collapses or expands the Last Prompt box, extending/reducing State of the Game by exact gained space."""
+        if self._prompt_collapsed:
+            self.prompt_content_frame.pack(fill=tk.X, pady=(0, 3))
+            self.prompt_toggle_btn.config(text="▼ LAST PROMPT")
+            self._prompt_collapsed = False
+            # Revert State of the Game back to standard height (4 lines)
+            self.summary_text.config(height=4)
+        else:
+            self.prompt_content_frame.pack_forget()
+            self.prompt_toggle_btn.config(text="▶ LAST PROMPT")
+            self._prompt_collapsed = True
+            # Extend State of the Game height by the exact height of the prompt box (4 lines)
+            self.summary_text.config(height=8)
 
     def _add_divider(self):
         tk.Frame(self.main_frame, bg=self.config_data.border_color, height=1).pack(fill=tk.X, padx=10)
 
     def _create_layout(self):
-        """Title bar is already packed first in _create_widgets, so it
-        claims the top slot before any other TOP-side child of
-        main_frame does.
-
-        drawer_frame and main_frame are both direct children of self,
-        packed side-by-side -- drawer_frame first (if open by default)
-        so it lands on the left, main_frame second with fill=BOTH/
-        expand=True to claim the remaining width. See
-        _set_drawer_visible() for runtime toggling."""
         if self._drawer_open:
-            self.drawer_frame.pack(side=tk.LEFT, fill=tk.Y)
+            self.drawer_outer_frame.pack(side=tk.LEFT, fill=tk.Y)
         self.main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
     def _add_borders(self):
-        """Add subtle border highlights around the window."""
         left_border = tk.Frame(self, bg="#00cc77", width=1)
         left_border.place(x=0, y=0, relheight=1.0)
         right_border = tk.Frame(self, bg="#00cc77", width=1)
@@ -605,11 +518,6 @@ class CoachOverlay(tk.Tk):
         bottom_border.place(x=0, rely=1.0, y=-1, relwidth=1.0)
 
     def _position_window(self):
-        """Position window relative to game or screen. The drawer grows
-        the window LEFTWARD -- if it's open at launch, x is shifted
-        left by its width up front, keeping the coaching panel's right
-        edge at the same screen position it'd occupy with the drawer
-        closed."""
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
 
@@ -617,21 +525,10 @@ class CoachOverlay(tk.Tk):
         x = screen_width + self.config_data.offset_x - drawer_offset
         y = self.config_data.offset_y
 
-        if x < 0:
-            x = 100
-        if y < 0:
-            y = 50
+        if x < 0: x = 100
+        if y < 0: y = 50
 
         self.geometry(f"+{x}+{y}")
-
-    # ─── Dragging / resizing ────────────────────────────────────────────────
-    # Both use screen-absolute (x_root/y_root) coordinates rather than
-    # widget-relative ones. Widget-relative coordinates are relative to
-    # whatever widget the event actually landed on, which varies as the
-    # cursor crosses child widgets during a drag -- that mismatch was the
-    # cause of the window jumping/lagging behind the mouse. Root
-    # coordinates are a single consistent frame of reference throughout
-    # the whole gesture.
 
     def _start_move(self, event):
         self._drag_offset_x = event.x_root - self.winfo_x()
@@ -656,31 +553,15 @@ class CoachOverlay(tk.Tk):
         self.geometry(f"{new_w}x{new_h}")
 
     def _on_close(self):
-        """Clean up on close.
-
-        Runs the shutdown callback (if any) BEFORE tearing this window
-        down, so e.g. gui_main.py can close the StreamClient socket --
-        which unblocks main()'s poll loop via the existing "adapter
-        disconnected" path -- while the window is still alive to show
-        the resulting on_connection_status(connected=False) update, if
-        it arrives in time.
-        """
         if self._on_close_callback:
             self._on_close_callback()
         self._running = False
         self.destroy()
 
-    # ─── Drawer (chat / question panel) ────────────────────────────────────
-
     def _toggle_drawer(self):
         self._set_drawer_visible(not self._drawer_open)
 
     def _set_drawer_visible(self, visible: bool):
-        """Grows/shrinks the WINDOW leftward, not the drawer's own
-        packed width -- drawer_frame stays a fixed drawer_width
-        throughout; what changes is whether it's packed at all, and how
-        far left the window's corner sits. Mirrors the math in
-        _position_window()."""
         if visible == self._drawer_open:
             return
 
@@ -690,28 +571,33 @@ class CoachOverlay(tk.Tk):
         current_height = self.winfo_height()
         delta = self.config_data.drawer_width
 
+        # Disable update idle rendering temporarily to suppress flicker artifacts
+        self.attributes('-alpha', 0.0)
+
         if visible:
-            self.drawer_frame.pack(side=tk.LEFT, fill=tk.Y, before=self.main_frame)
+            self.drawer_outer_frame.pack(side=tk.LEFT, fill=tk.Y, before=self.main_frame)
             new_x = current_x - delta
             new_width = current_width + delta
         else:
-            self.drawer_frame.pack_forget()
+            self.drawer_outer_frame.pack_forget()
             new_x = current_x + delta
             new_width = current_width - delta
 
         self._drawer_open = visible
         self.geometry(f"{new_width}x{current_height}+{new_x}+{current_y}")
-        self.drawer_toggle_button.config(text="Chat «" if visible else "Chat »")
+        self.drawer_toggle_button.config(text="« Chat" if visible else "Chat »")
+        
+        self.update_idletasks()
+        self.attributes('-alpha', self.config_data.opacity)
 
     def _handle_send(self):
-        """Bound to the Send button and <Return> in the chat entry."""
-        text = self.chat_entry.get().strip()
+        text = self.chat_entry.get("1.0", tk.END).strip()
         if not text:
             return
         message_type = self.message_type_var.get()
 
         self.append_chat_message("player", text, type_label=message_type)
-        self.chat_entry.delete(0, tk.END)
+        self.chat_entry.delete("1.0", tk.END)
 
         if self._on_send_message:
             self._on_send_message(text, message_type)
@@ -719,11 +605,6 @@ class CoachOverlay(tk.Tk):
             self.append_chat_message("coach", "(not connected yet -- try again in a moment)")
 
     def append_chat_message(self, role: str, text: str, type_label: Optional[str] = None):
-        """Thread-safe: appends one entry to the drawer's chat history.
-        role is 'player' or 'coach'. Called directly (main thread) from
-        _handle_send() for the player's own echo, and via GeminiWorker's
-        thread -> UIObserver for the model's reply -- see
-        ui_observer.py's on_advice_received()."""
         def _update():
             label = "You" if role == "player" else "Coach"
             if type_label:
@@ -741,6 +622,24 @@ class CoachOverlay(tk.Tk):
                 self.chat_text.see(tk.END)
         self.after(0, _update)
 
+    @staticmethod
+    def _is_scrolled_to_bottom(text_widget, threshold=0.98) -> bool:
+        try:
+            _, bottom = text_widget.yview()
+        except tk.TclError:
+            return True
+        return bottom >= threshold
+
+    def clear_feedback_history(self):
+        self.feedback_text.config(state=tk.NORMAL)
+        self.feedback_text.delete("1.0", tk.END)
+        self.feedback_text.config(state=tk.DISABLED)
+
+    def _on_reset_rule_selected(self, tz_str, label_text):
+        self.reset_rule_button.config(text=f"Reset: {label_text}")
+        if self._on_reset_rule_change:
+            self._on_reset_rule_change(tz_str)
+            
     # ─── Public API Methods ────────────────────────────────────────────────
 
     @staticmethod
