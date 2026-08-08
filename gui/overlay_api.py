@@ -82,8 +82,10 @@ class OverlayApiMixin:
         )
         self._eta_thread.start()
 
-        self.eta_label.config(text="0:00")
-        self.eta_bar.coords(self.eta_bar_progress, 0, 0, 0, 8)
+        def _update():
+            self.eta_label.config(text="0:00")
+            self.eta_bar.coords(self.eta_bar_progress, 0, 0, 0, 8)
+        self.after(0, _update)
 
     def _eta_worker(self, total_seconds: int):
         """Background worker for countdown timer."""
@@ -177,8 +179,10 @@ class OverlayApiMixin:
         self.after(0, _update)
 
     def feedback_status(self, message: str):
-        """Update status label message."""
-        self.status_label.config(text=message)
+        """Thread-safe: update status label message."""
+        def _update():
+            self.status_label.config(text=message)
+        self.after(0, _update)
 
     def set_connection_status(self, connected: bool):
         """Thread-safe: update title-bar connection status dot."""

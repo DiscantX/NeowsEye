@@ -162,3 +162,11 @@ class DecisionTrigger:
         is_new = screen_key != self._last_screen_key
         self._last_screen_key = screen_key
         return is_new
+
+    def _should_prompt_grid(self, screen_state: dict) -> bool:
+        """Dedupes GRID per-visit per-flavor (purge, upgrade, transform, other)."""
+        flavor = _grid_flavor(screen_state)
+        screen_key = ("GRID", flavor)
+        is_new = screen_key != self._last_screen_key
+        self._last_screen_key = screen_key
+        return is_new
