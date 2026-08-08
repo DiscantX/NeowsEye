@@ -68,6 +68,25 @@ class GeminiWorker:
 
     def submit_end_combat(self, prior_state_summary: str = "") -> int:
         return self._submit("end_combat", {"prior_state_summary": prior_state_summary})
+    
+    def submit_start_map(self, payload: dict) -> int:
+        return self._submit("start_map", payload)
+
+    def submit_map_choice(self, payload: dict) -> int:
+        return self._submit("map_choice", payload)
+
+    def submit_end_map(self) -> int:
+        """Bypasses _submit()'s on_prompt_sent -- unlike end_combat,
+        this never calls Gemini (see GeminiClient.end_map()), so no
+        response is ever coming and there's nothing to start an ETA
+        countdown FOR. end_combat gets away with going through
+        _submit() because its worker path guarantees a SummaryEvent
+        even on its own no-op branch (see the None-reply handling in
+        _run()) -- end_map has no equivalent close-out, so the fix is
+        to not open one, not to invent a fake one."""
+        seq = next_seq()
+        self._queue.put(_Task("end_map", {}, seq))
+        return seq
 
     def submit_player_message(self, payload: dict) -> int:
         return self._submit("player_message", payload)
@@ -87,14 +106,15 @@ class GeminiWorker:
     def _run(self):
         while True:
             task = self._queue.get()
+            
+            task = self._queue.get()
+
+            if task.kind == "end_map":
+                self._gemini.end_map()
+                continue
 
             if self._usage.is_daily_quota_exhausted():
                 if task.kind == "end_combat":
-                    # Can't afford the extra request -- still have to close
-                    # the session so it doesn't leak into the next fight's
-                    # start_combat(). No error surfaced here specifically:
-                    # whatever advice call already hit this quota wall this
-                    # fight will have shown the error once already.
                     self._gemini.discard_combat_session()
                 else:
                     self._observer.on_error(ErrorEvent(
@@ -167,6 +187,10 @@ class GeminiWorker:
             return self._gemini.one_off(task.payload)
         if task.kind == "end_combat":
             return self._gemini.end_combat(task.payload.get("prior_state_summary", ""))
+        if task.kind == "start_map":
+            return self._gemini.start_map(task.payload)
+        if task.kind == "map_choice":
+            return self._gemini.map_choice(task.payload)
         if task.kind == "player_message":
             return self._gemini.player_message(task.payload)
         raise ValueError(f"Unknown task kind: {task.kind}")

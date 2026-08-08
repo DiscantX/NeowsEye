@@ -78,9 +78,11 @@ class UsageTracker:
             "tokens_today": self.tokens_today,
         }
         tmp_path = self._state_path + ".tmp"
+        state_dir = os.path.dirname(self._state_path)
+        if state_dir:
+            os.makedirs(state_dir, exist_ok=True)
         with open(tmp_path, "w") as f:
             json.dump(data, f)
-        # os.makedirs(self._state_path, exist_ok=True)
         os.replace(tmp_path, self._state_path)  # atomic on POSIX and Windows
 
     def _roll_period_if_needed(self):

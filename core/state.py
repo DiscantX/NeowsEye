@@ -237,3 +237,39 @@ class Potion:
 
     def to_prompt_dict(self) -> dict:
         return {"name": self.name, "can_use": self.can_use}
+    
+ROOM_SYMBOLS = {
+    "M": "monster",
+    "E": "elite",
+    "R": "rest",
+    "$": "shop",
+    "T": "treasure",
+    "?": "unknown",
+}
+
+@dataclass
+class MapNode:
+    x: Optional[int]
+    y: Optional[int]
+    symbol: str
+    children: list  # list of (x, y) tuples this node connects to -- only
+                     # populated for nodes from the full act graph
+                     # (game_state.map); current_node/next_nodes entries
+                     # from screen_state don't carry children and default
+                     # to empty, which is fine -- we already have the
+                     # full graph to look them up in if needed.
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MapNode":
+        return cls(
+            x=data.get("x"),
+            y=data.get("y"),
+            symbol=data.get("symbol", "?"),
+            children=[(c.get("x"), c.get("y")) for c in data.get("children", [])],
+        )
+
+    def to_prompt_dict(self) -> dict:
+        d = {"x": self.x, "y": self.y, "type": ROOM_SYMBOLS.get(self.symbol, self.symbol)}
+        if self.children:
+            d["connects_to"] = [{"x": x, "y": y} for x, y in self.children]
+        return d

@@ -56,8 +56,7 @@ forgotten):
 import json
 from typing import Optional
 
-from core.state import Card, Monster, Orb, Power, Potion, Relic, dedupe_cards
-
+from core.state import Card, Monster, MapNode, Orb, Power, Potion, Relic, dedupe_cards
 
 def _fingerprint(value):
     """Structural equality check across polls. Works on dataclasses (via
@@ -205,6 +204,66 @@ class CombatState:
             d["exhaust_pile_count"] = self.exhaust_pile_count
         return d
 
+class MapState:
+    """One act's map graph plus the player's current position within
+    it. Constructed on the act's first MAP-screen poll, discarded when
+    the act changes (see RunState.apply()). Mirrors CombatState's
+    full-payload/dirty-payload split, but `nodes` -- the graph itself
+    -- is only ever dirty at construction: CommunicationMod hands back
+    the same act graph unchanged for the whole act, only current_node/
+    next_nodes/boss_available move. apply() takes map_nodes=None on
+    every call after construction for exactly that reason -- there's
+    nothing to re-diff there and doing so on ~50 nodes every poll would
+    be wasted work for a value that can't have changed."""
+
+    TRACKED_FIELDS = ("nodes", "current_node", "next_nodes", "boss_available")
+
+    def __init__(self, act: int, map_nodes: list, screen_state: dict):
+        self.act = act
+        for f in self.TRACKED_FIELDS:
+            setattr(self, f, None)
+        self.nodes = []
+        self.next_nodes = []
+        self.dirty = set()
+        self._apply(map_nodes, screen_state, force_dirty=True)
+
+    def apply(self, screen_state: dict):
+        """Call on every MAP-screen poll within the same act."""
+        self._apply(None, screen_state, force_dirty=False)
+
+    def _apply(self, map_nodes, screen_state: dict, force_dirty: bool):
+        new_values = {}
+        if map_nodes is not None:
+            new_values["nodes"] = [MapNode.from_dict(n) for n in map_nodes]
+        new_values["current_node"] = MapNode.from_dict(screen_state.get("current_node") or {})
+        new_values["next_nodes"] = [MapNode.from_dict(n) for n in screen_state.get("next_nodes", [])]
+        new_values["boss_available"] = screen_state.get("boss_available", False)
+
+        for field_name, new_value in new_values.items():
+            if force_dirty or _fingerprint(new_value) != _fingerprint(getattr(self, field_name)):
+                setattr(self, field_name, new_value)
+                self.dirty.add(field_name)
+
+    def mark_synced(self):
+        self.dirty.clear()
+
+    def full_payload(self) -> dict:
+        return self._payload(self.TRACKED_FIELDS)
+
+    def dirty_payload(self) -> dict:
+        return self._payload(self.dirty)
+
+    def _payload(self, fields) -> dict:
+        d = {}
+        if "nodes" in fields:
+            d["map"] = [n.to_prompt_dict() for n in self.nodes]
+        if "current_node" in fields:
+            d["current_node"] = self.current_node.to_prompt_dict() if self.current_node else None
+        if "next_nodes" in fields:
+            d["next_nodes"] = [n.to_prompt_dict() for n in self.next_nodes]
+        if "boss_available" in fields:
+            d["boss_available"] = self.boss_available
+        return d
 
 class RunState:
     """One instance per run. Construct once, then call apply(game_state)
@@ -234,7 +293,17 @@ class RunState:
         self.relics = []
         self.potions = []
         self.combat: Optional[CombatState] = None
+        self.map: Optional[MapState] = None
+        self.map_needs_teardown: bool = False
         self.strategic_summary: str = ""
+        self.route_plan: str = ""  # distilled cross-session bridge from the
+                                    # map coach back into combat/non-combat
+                                    # prompts -- e.g. "no rest site before
+                                    # the boss, prioritize survivability."
+                                    # WIRING DEFERRED: field + storage exist,
+                                    # but no gemini_client map prompt writes
+                                    # to it yet -- see gemini_client.py's
+                                    # end_map() docstring.
         self.summary_log: list = []  # [{"floor", "act", "kind": "combat"|"state", "text"}, ...]
 
         self.dirty = set()
@@ -290,6 +359,29 @@ class RunState:
                 self.combat.apply(combat_dict)
         else:
             self.combat = None  # fight ended (or never started)
+        
+        combat_dict = game_state.get("combat_state")
+        if combat_dict is not None:
+            if self.combat is None:
+                self.combat = CombatState(combat_dict)
+            else:
+                self.combat.apply(combat_dict)
+        else:
+            self.combat = None
+
+        # Map handling -- act-scoped, keyed on act rather than
+        # screen_type presence: the graph stays valid reference context
+        # for the whole act, not just while screen_type == "MAP".
+        self.map_needs_teardown = act_changed and self.map is not None
+        if self.map_needs_teardown:
+            self.map = None
+
+        if self.screen_type == "MAP":
+            map_screen_state = self.screen_state or {}
+            if self.map is None or self.map.act != new_act:
+                self.map = MapState(new_act, game_state.get("map", []), map_screen_state)
+            else:
+                self.map.apply(map_screen_state)
 
     def apply_summary(self, combat_summary: str, state_summary: str):
         """Called when a combat-end summarization result comes back.
@@ -403,6 +495,33 @@ class RunState:
                 payload["gold"] = self.gold
             payload["screen_type"] = self.screen_type
             payload["screen_state"] = self._screen_state_payload()
+            return payload
+
+    def map_intro_payload(self) -> dict:
+            """Sent once, at an act's first genuine fork. Opens a fresh
+            per-act chat session (gemini_client.start_map()) -- like
+            combat_intro_payload(), this sends the full run-level picture
+            plus the full node graph, not just self.map.dirty, since the
+            session has no prior context to build on."""
+            assert self.map is not None
+            payload = {"event": "map_fork"}
+            payload.update(self._run_level_payload(self.TRACKED_FIELDS))
+            if self.strategic_summary:
+                payload["state_of_the_game"] = self.strategic_summary
+            payload.update(self.map.full_payload())
+            return payload
+
+    def map_choice_payload(self) -> dict:
+            """Sent on subsequent forks within the same act's map session --
+            only the position delta (current_node/next_nodes/boss_available)
+            plus any run-level fields that changed since the last message
+            sent anywhere (e.g. gold spent at a shop visited between forks).
+            The graph itself isn't resent -- already in this session from
+            map_intro_payload() and doesn't change shape mid-act."""
+            assert self.map is not None
+            payload = {"event": "map_fork"}
+            payload.update(self._run_level_payload(self.dirty))
+            payload.update(self.map.dirty_payload())
             return payload
 
     def player_message_payload(self, message: str, message_type: str) -> dict:

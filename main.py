@@ -120,6 +120,9 @@ def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None,
             was_in_combat = in_combat
 
             run_state.apply(game_state)
+            run_state.apply(game_state)
+            if run_state.map_needs_teardown:
+                worker.submit_end_map()
             in_combat = run_state.combat is not None
 
             if was_in_combat and not in_combat:
@@ -149,6 +152,13 @@ def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None,
                     worker.submit_turn_update(run_state.turn_delta_payload())
                 run_state.mark_synced()
                 run_state.combat.mark_synced()
+            elif run_state.map is not None and run_state.screen_type == "MAP":
+                if "nodes" in run_state.map.dirty:
+                    worker.submit_start_map(run_state.map_intro_payload())
+                else:
+                    worker.submit_map_choice(run_state.map_choice_payload())
+                run_state.mark_synced()
+                run_state.map.mark_synced()
             else:
                 worker.submit_one_off(run_state.noncombat_payload())
                 run_state.mark_synced()

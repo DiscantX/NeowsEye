@@ -205,6 +205,7 @@ class GeminiClient:
             ),
         )
         self._chat = None
+        self._map_chat = None
 
     def start_combat(self, combat_intro: dict) -> str:
         """Opens a fresh chat session for a new combat, sends the one-time
@@ -284,6 +285,46 @@ class GeminiClient:
         )
         return self._ask(context, chat)
 
+    def start_map(self, map_intro: dict) -> "GeminiReply":
+        """Opens a fresh chat session for a new act's map, sends the
+        full node graph plus the current fork, and returns advice on
+        which node to pick. Mirrors start_combat()'s full-context-once
+        shape -- see MapState in run_state.py."""
+        self._map_chat = self.client.chats.create(
+            model=self.model_name, config=self._chat_config
+        )
+        return self._ask(self._with_map_instruction(map_intro), self._map_chat)
+
+    def map_choice(self, map_delta: dict) -> "GeminiReply":
+        """Sends a lightweight fork delta within the current act's map
+        session."""
+        if self._map_chat is None:
+            # e.g. main.py restarted mid-act -- no session to append to.
+            return self.start_map(map_delta)
+        return self._ask(self._with_map_instruction(map_delta), self._map_chat)
+
+    def end_map(self):
+        """Closes the current act's map session -- no summarization call,
+        just teardown (see discard_combat_session()). The map's influence
+        on later decisions currently flows only through state_of_the_game
+        (RunState.strategic_summary); a distilled route_plan bridge
+        (RunState.route_plan) is reserved but not yet written to -- needs
+        its own prompt design pass before wiring it up here."""
+        self._map_chat = None
+
+    @staticmethod
+    def _with_map_instruction(payload: dict) -> dict:
+        d = dict(payload)
+        d["instruction"] = (
+            "Recommend which next_node (by x,y) to move to and why, in "
+            "1-2 sentences, weighed against the current deck/relics/hp/gold "
+            "and overall run strategy. You have the full act map graph in "
+            "this session's context -- use it for path-planning (e.g. "
+            "proximity to a Rest Site before the act boss, or an Elite "
+            "worth fighting for a relic), not just the immediate choice."
+        )
+        return d
+
     def player_message(self, payload: dict) -> "GeminiReply":
         """Player-initiated question or feedback from the GUI's chat
         panel. Rides the CURRENT combat's chat session if one is open,
@@ -312,8 +353,16 @@ class GeminiClient:
         for attempt in range(1, config.RETRY_MAX_ATTEMPTS + 1):
             try:
                 response = chat.send_message(json.dumps(payload))
+                text = (response.text or "").strip()
+                if not text:
+                    # Not an errors.APIError -- deliberately skips the
+                    # retry loop below and propagates straight out to
+                    # _run()'s broad except, same as any other failure.
+                    # A second attempt would likely just spend another
+                    # full thinking budget and land here again.
+                    raise RuntimeError(_describe_empty_response(response))
                 return GeminiReply(
-                    text=response.text.strip(),
+                    text=text,
                     usage_metadata=getattr(response, "usage_metadata", None),
                     reasoning=_extract_reasoning(response),
             )
@@ -344,3 +393,26 @@ def _extract_reasoning(response) -> Optional[str]:
         if getattr(p, "thought", False) and getattr(p, "text", None)
     ]
     return "\n".join(thoughts) if thoughts else None
+
+def _describe_empty_response(response) -> str:
+    """Builds a diagnostic message for a response that returned no
+    usable text -- no exception, valid HTTP response, but nothing to
+    show. Most likely cause: the entire output token budget got spent
+    on thinking (config.THINKING_LEVEL) before any final answer was
+    produced. Surfaced as an error (see _ask()) rather than silently
+    passed through as blank advice -- otherwise this looks identical
+    to nothing happening at all, in both the GUI and the terminal."""
+    try:
+        candidate = response.candidates[0]
+        finish_reason = getattr(candidate, "finish_reason", None)
+    except (AttributeError, IndexError, TypeError):
+        finish_reason = None
+    usage = getattr(response, "usage_metadata", None)
+    thoughts_tokens = getattr(usage, "thoughts_token_count", None) if usage else None
+    return (
+        f"Gemini returned no usable text (finish_reason={finish_reason}, "
+        f"thoughts_token_count={thoughts_tokens}) -- likely the full output "
+        f"budget was spent on thinking before an answer was produced. If "
+        f"this repeats, consider lowering config.THINKING_LEVEL or setting "
+        f"an explicit max_output_tokens."
+    )

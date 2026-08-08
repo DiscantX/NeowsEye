@@ -20,6 +20,7 @@ NON_COMBAT_DECISION_SCREENS = {
     "BOSS_REWARD",
     "GRID",
     "HAND_SELECT",
+    "MAP",
 }
 # SHOP_ROOM removed -- first-enter payload is always screen_state: {},
 # no stock loaded yet. SHOP_SCREEN is the one that carries real inventory.
@@ -100,7 +101,10 @@ class DecisionTrigger:
         if screen_type == "GRID":
             return self._should_prompt_grid(screen_state)
 
-        # Default: fingerprint-based dedupe (CARD_REWARD, SHOP_SCREEN,
+        if screen_type == "MAP":
+            return self._should_prompt_map(screen_state)
+
+        # Default: fingerprint-based dedupe (CARD_REWARD, SHOP_SCREEN,,
         # BOSS_REWARD, HAND_SELECT, and multi-option EVENT).
         screen_key = (screen_type, _fingerprint(screen_state))
         is_new = screen_key != self._last_screen_key
@@ -138,13 +142,23 @@ class DecisionTrigger:
         )
         return real_potion_count >= 3
 
-    def _should_prompt_grid(self, screen_state: dict) -> bool:
-        """Fires once per visit to a GRID screen (keyed by type + flavor:
-        purge/upgrade/transform), ignoring internal screen_state churn --
-        e.g. a shop purchase elsewhere changing the fingerprint used to
-        re-trigger this on every poll while the player was still looking
-        at the same purge/upgrade choice."""
-        screen_key = ("GRID", _grid_flavor(screen_state))
+    def _should_prompt_map(self, screen_state: dict) -> bool:
+        """Fires only at genuine forks: an act's first crossroads
+        (first_node_chosen still False -- current_node isn't set yet,
+        so multiple pre-choice polls all key to the same (None, None)
+        and only fire once) or any node offering more than one reachable
+        next_node. Single-path hallway floors -- the common case -- are
+        silently skipped: RunState still updates MapState.current_node
+        via the state snapshot, just without spending a request on it.
+        See todo.md's map-cost discussion for why this gate exists."""
+        next_nodes = screen_state.get("next_nodes") or []
+        is_fork = not screen_state.get("first_node_chosen", True) or len(next_nodes) > 1
+        if not is_fork:
+            self._last_screen_key = None
+            return False
+
+        current = screen_state.get("current_node") or {}
+        screen_key = ("MAP", current.get("x"), current.get("y"))
         is_new = screen_key != self._last_screen_key
         self._last_screen_key = screen_key
         return is_new
