@@ -33,7 +33,7 @@ class OverlayConfig:
     eta_color: str = "#ff9900"
     token_color: str = "#aa88ff"
     success_color: str = "#00cc77"
-    error_color: str = "#ff4466"
+    error_color: str = "#c93b55"
     dim_color: str = "#888888"
     summary_color: str = "#ffd966"
     opacity: float = 0.93
