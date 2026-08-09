@@ -359,15 +359,6 @@ class RunState:
                 self.combat.apply(combat_dict)
         else:
             self.combat = None  # fight ended (or never started)
-        
-        combat_dict = game_state.get("combat_state")
-        if combat_dict is not None:
-            if self.combat is None:
-                self.combat = CombatState(combat_dict)
-            else:
-                self.combat.apply(combat_dict)
-        else:
-            self.combat = None
 
         # Map handling -- act-scoped, keyed on act rather than
         # screen_type presence: the graph stays valid reference context

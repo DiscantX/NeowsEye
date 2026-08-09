@@ -120,7 +120,6 @@ def main(observer=None, on_client_ready=None, on_usage_tracker_ready=None,
             was_in_combat = in_combat
 
             run_state.apply(game_state)
-            run_state.apply(game_state)
             if run_state.map_needs_teardown:
                 worker.submit_end_map()
             in_combat = run_state.combat is not None

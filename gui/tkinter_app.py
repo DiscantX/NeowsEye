@@ -53,6 +53,10 @@ class CoachOverlay(tk.Tk, ChatDrawerMixin, OverlayApiMixin):
         
         self._on_reset_rule_change = on_reset_rule_change
 
+        # Thread-safe UI dispatch -- see OverlayApiMixin._init_dispatch_queue.
+        # Must come after self._running is set.
+        self._init_dispatch_queue()
+
         # Position window on screen
         self._position_window()
 

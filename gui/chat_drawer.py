@@ -123,4 +123,4 @@ class ChatDrawerMixin:
 
             if was_at_bottom:
                 self.chat_text.see(tk.END)
-        self.after(0, _update)
+        self._dispatch(_update)
