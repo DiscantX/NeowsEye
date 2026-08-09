@@ -268,8 +268,10 @@ class MapNode:
             children=[(c.get("x"), c.get("y")) for c in data.get("children", [])],
         )
 
-    def to_prompt_dict(self) -> dict:
+    def to_prompt_dict(self, position: Optional[str] = None) -> dict:
         d = {"x": self.x, "y": self.y, "type": ROOM_SYMBOLS.get(self.symbol, self.symbol)}
+        if position:
+            d["position"] = position
         if self.children:
             d["connects_to"] = [{"x": x, "y": y} for x, y in self.children]
         return d

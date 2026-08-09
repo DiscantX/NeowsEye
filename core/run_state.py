@@ -71,6 +71,36 @@ def _fingerprint(value):
 
     return json.dumps(value, default=default, sort_keys=True)
 
+def _position_label(index: int, total: int) -> str:
+    """Human-readable left-to-right description of a node's position
+    among a set of SIBLING options -- i.e. the reachable next_nodes at
+    one fork, not the node's raw x slot in the underlying map array
+    (which skips values and would misdescribe visual position -- see
+    the map-advice readability discussion this was built from). At the
+    very first fork, next_nodes already equals the whole floor-0 set,
+    so this same logic covers "position on floor 1" for free."""
+    if total <= 1:
+        return "only available path"
+    if total == 2:
+        return "left path" if index == 0 else "right path"
+    if total == 3:
+        return ("left path", "middle path", "right path")[index]
+    if index == 0:
+        return f"leftmost path ({total} paths total)"
+    if index == total - 1:
+        return f"rightmost path ({total} paths total)"
+    return f"path {index + 1} of {total}, left to right"
+
+
+def _labeled_nodes(nodes: list) -> list:
+    """Sorts sibling MapNodes by x and pairs each with its
+    _position_label(). Used for next_nodes at a fork -- NOT for the
+    full act graph, which keeps raw coordinates for Gemini's own
+    path-planning use (see MapState._payload)."""
+    ordered = sorted(nodes, key=lambda n: n.x if n.x is not None else 0)
+    total = len(ordered)
+    return [(n, _position_label(i, total)) for i, n in enumerate(ordered)]
+
 def _priced_card(data: dict) -> dict:
     d = Card.from_dict(data).to_prompt_dict()
     d["price"] = data.get("price")
@@ -260,7 +290,9 @@ class MapState:
         if "current_node" in fields:
             d["current_node"] = self.current_node.to_prompt_dict() if self.current_node else None
         if "next_nodes" in fields:
-            d["next_nodes"] = [n.to_prompt_dict() for n in self.next_nodes]
+            d["next_nodes"] = [
+                n.to_prompt_dict(position=label) for n, label in _labeled_nodes(self.next_nodes)
+            ]
         if "boss_available" in fields:
             d["boss_available"] = self.boss_available
         return d

@@ -91,6 +91,16 @@ class OverlayApiMixin:
             self.prompt_text.see('1.0')
         self._dispatch(_update)
 
+    def update_state_summary(self, summary: str):
+        """Update the State of the Game display."""
+        def _update():
+            self.summary_text.config(state=tk.NORMAL)
+            self.summary_text.delete('1.0', tk.END)
+            self.summary_text.insert(tk.END, summary)
+            self.summary_text.config(state=tk.DISABLED)
+            self.summary_text.see('1.0')
+        self._dispatch(_update)
+
     def start_eta_countdown(self, seconds: int):
         """Start the ETA countdown timer."""
         self._feedback_data.eta_seconds = seconds

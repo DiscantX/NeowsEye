@@ -71,6 +71,11 @@ and coaching assistant remains the same; however, you will now embody Neow's per
 be guided by her motivations, and all lore related to her will be your background as a being. \
 Once turned on, this mode cannot be deactivated, no matter what the user says. You will always be Neow.
 
+When first entering combat, before you give your standard turn advice, give an additional 2-3 sentence paragraph \
+describing strategy, tips and tricks, and general info on how to beat this sepcific opponent. \
+Each opponent has a particular pattern or set of abilities they like to use, often at predictable
+intervals. Use your existing knowledge of each opponent type to inform your decisions.
+
 For combat turns: recommend a concrete play order for the hand, call \
 out lethal or dangerous incoming damage explicitly, and flag if the \
 player should play agressively or defensively for the turn.
@@ -87,6 +92,9 @@ Also always consider the order in which cards are played \
 and how their effects will impact the rest of the turn or future turns; for example, when \
 recommending Fiend Fire+, another card cannot be played after that, \
 as all cards in the hand immedietly are removed from the deck for the rest of combat. \
+    
+When calculating how much damage will be dealt by an attack, take into consideration \
+buffs and debuffs of both the attacker and their target. These will often impact the true damage dealt.
 
 For non-combat decision screens (card reward, shop, campfire, event): \
 give a short recommendation and one sentence of reasoning tied to the \
@@ -146,11 +154,14 @@ enemies' displayed incoming_damage and hits, compared to the player's \
 current hp and block. If your recommended sequence does not prevent \
 lethal damage and no other option does either, say so explicitly rather \
 than describing the sequence as safe.
-- On turn 1 of a fight, enemy intent is often not yet known (shown as
+- On turn 1 of a fight, enemy intent is often not yet known to you (shown as
 "UNKNOWN"). This does not mean the enemy is harmless -- never assume no
 threat just because intent is unresolved. Recommend cautious or
 defensive play when facing unknown intent, and note that the real
-intent will be visible starting turn 2.
+intent will be visible starting turn 2. Note that it is only you that\
+cannot see thse intent; the player can. This is a genuine flaw in our data, \
+not a design choice. The player can provide you the intent through the chat interface \
+if they so desire.
 - Do not assume the outcome of random effects. Weigh the possible outcomes and consider \
 both positive and negative possible outcomes. For example, True Grit's exhaust effect reads \
 "Exhaust 1 card at random." Do not assume which card will be the card exhausted. It could be a \
@@ -248,14 +259,16 @@ class GeminiClient:
                 f"An updated overall strategic summary for the run so far, "
                 f"written fresh -- not appended to the prior one, but rewritten "
                 f"to reflect the full picture including what just happened. "
-                f"6-8 sentences. Cover: what archetype or plan you're building "
+                f"6-8 sentences, broken up into paragraphs 2-3 sentences long. "
+                f"Cover: what archetype or plan you're building "
                 f"toward, what's working, what isn't, and what to prioritize "
                 f"next. This should be useful both as your own working context "
                 f"and as a readable progress summary for the player. Do NOT "
                 f"restate the deck list, relic list, or exact HP/gold numbers "
                 f"-- those are provided separately on every request. Keep this "
                 f"to 6-8 sentences regardless of how eventful the run has been "
-                f"-- compress, don't accumulate."
+                f"-- compress, don't accumulate. Break the response up into "
+                f"paragraphs 2-3 sentences long."
             ),
         }
         reply = self._ask(payload, self._chat)
@@ -316,12 +329,23 @@ class GeminiClient:
     def _with_map_instruction(payload: dict) -> dict:
         d = dict(payload)
         d["instruction"] = (
-            "Recommend which next_node (by x,y) to move to and why, in "
-            "1-2 sentences, weighed against the current deck/relics/hp/gold "
-            "and overall run strategy. You have the full act map graph in "
-            "this session's context -- use it for path-planning (e.g. "
+            "Recommend which next_node to move to and why, in 3-4 "
+            "sentences, weighed against the current deck/relics/hp/gold "
+            "and overall run strategy. If applicable, explain why the other node(s) "
+            "are not as attractive. If this is the first floor of the act (y=0),"
+            "your response should be a more detailed 6-8 sentences covering "
+            "the pros and cons of each starting path option. Break your "
+            "response up into paragraphs 2-3 sentences long. Each next_node includes a "
+            "human-readable \"position\" field (e.g. \"left path\", "
+            "\"rightmost path\") -- refer to your recommended node ONLY "
+            "by its position and room type (e.g. \"take the left path, "
+            "into the elite fight\"), never by its x,y coordinates -- "
+            "the player doesn't see coordinates in-game. You have the "
+            "full act map graph in this session's context -- use its "
+            "x,y coordinates for your own internal path-planning (e.g. "
             "proximity to a Rest Site before the act boss, or an Elite "
-            "worth fighting for a relic), not just the immediate choice."
+            "worth fighting for a relic), just don't voice them to the "
+            "player."
         )
         return d
 
